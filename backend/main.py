@@ -42,7 +42,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="ALTER EGO",
     description="A digital twin with hybrid (graph + vector + keyword) memory.",
-    version="0.6.0",
+    version="0.7.0",
     lifespan=lifespan,
 )
 

@@ -18,6 +18,7 @@ from typing import Literal
 from qdrant_client import AsyncQdrantClient, models
 
 from backend.config import Settings, get_settings
+from backend.crypto.vault import get_vault
 
 log = logging.getLogger(__name__)
 
@@ -47,9 +48,11 @@ class ScoredMemory:
 
 
 def _payload(record: MemoryRecord) -> dict[str, object]:
+    """Serialise a record for storage. Text is encrypted here, so that no call
+    site can write plaintext by forgetting to."""
     return {
         "session_id": record.session_id,
-        "text": record.text,
+        "text_encrypted": get_vault().encrypt(record.session_id, record.text),
         "source_type": record.source_type,
         "created_at": record.created_at,
         "summarized": record.summarized,
@@ -57,10 +60,12 @@ def _payload(record: MemoryRecord) -> dict[str, object]:
 
 
 def _record(point_id: str, payload: dict) -> MemoryRecord:
+    """Rehydrate a record, decrypting server-side with the session's own key."""
+    session_id = payload["session_id"]
     return MemoryRecord(
         id=str(point_id),
-        session_id=payload["session_id"],
-        text=payload.get("text", ""),
+        session_id=session_id,
+        text=get_vault().decrypt(session_id, payload.get("text_encrypted", "")),
         source_type=payload.get("source_type", "message"),
         created_at=payload.get("created_at", ""),
         summarized=bool(payload.get("summarized", False)),
@@ -145,7 +150,8 @@ class VectorStore:
             query_filter=_session_filter(session_id, include_summarized=False),
             with_payload=True,
         )
-        return [ScoredMemory(_record(p.id, p.payload or {}), float(p.score)) for p in res.points]
+        scored = [ScoredMemory(_record(p.id, p.payload or {}), float(p.score)) for p in res.points]
+        return [s for s in scored if s.record.text]
 
     async def list_session(
         self,
@@ -165,18 +171,32 @@ class VectorStore:
             self._collection, scroll_filter=flt, limit=limit, with_payload=True
         )
         records = [_record(p.id, p.payload or {}) for p in points]
+        records = [r for r in records if r.text]
         records.sort(key=lambda r: r.created_at)
         return records
 
-    async def set_summarized(self, ids: list[str]) -> None:
-        """Mark records as folded into a summary, which drops them from recall."""
+    async def set_summarized(self, session_id: str, ids: list[str]) -> None:
+        """Mark records as folded into a summary, which drops them from recall.
+
+        Selected by id *and* session, so a stray id from another session is a
+        no-op rather than a cross-session write.
+        """
         if not ids:
             return
         await self.ensure_ready()
         await self._client.set_payload(
             self._collection,
             payload={"summarized": True},
-            points=ids,
+            points=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="session_id", match=models.MatchValue(value=session_id)
+                        ),
+                        models.HasIdCondition(has_id=ids),
+                    ]
+                )
+            ),
         )
 
     async def delete_session(self, session_id: str) -> None:

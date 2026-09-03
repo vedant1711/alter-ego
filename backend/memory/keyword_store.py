@@ -38,13 +38,15 @@ class ScoredMemory:
 class KeywordStore:
     def __init__(self, vector_store: VectorStore) -> None:
         self._vectors = vector_store
-        self._cache: dict[str, tuple[BM25Okapi, list[MemoryRecord]]] = {}
+        self._cache: dict[str, tuple[BM25Okapi, list[MemoryRecord], list[set[str]]]] = {}
 
     def invalidate(self, session_id: str) -> None:
         """Called after any write, so the next search reindexes."""
         self._cache.pop(session_id, None)
 
-    async def _index(self, session_id: str) -> tuple[BM25Okapi, list[MemoryRecord]] | None:
+    async def _index(
+        self, session_id: str
+    ) -> tuple[BM25Okapi, list[MemoryRecord], list[set[str]]] | None:
         cached = self._cache.get(session_id)
         if cached is not None:
             return cached
@@ -56,7 +58,7 @@ class KeywordStore:
         if not any(corpus):
             return None
 
-        index = (BM25Okapi(corpus), records)
+        index = (BM25Okapi(corpus), records, [set(doc) for doc in corpus])
         self._cache[session_id] = index
         return index
 
@@ -68,11 +70,21 @@ class KeywordStore:
         if index is None:
             return []
 
-        bm25, records = index
+        bm25, records, vocabularies = index
         scores = bm25.get_scores(tokens)
-        ranked = sorted(zip(records, scores, strict=True), key=lambda p: p[1], reverse=True)
-        # BM25 scores everything, including documents sharing no terms at all.
-        return [ScoredMemory(r, float(s)) for r, s in ranked[:limit] if s > 0]
+        wanted = set(tokens)
+
+        # Relevance is decided by term overlap, not by the sign of the score.
+        # BM25's IDF goes negative for a term that appears in every document,
+        # so on a small corpus — which is every session's first few turns — a
+        # "score > 0" filter would throw away the only real matches.
+        hits = [
+            ScoredMemory(record, float(score))
+            for record, score, vocabulary in zip(records, scores, vocabularies, strict=True)
+            if wanted & vocabulary
+        ]
+        hits.sort(key=lambda h: h.score, reverse=True)
+        return hits[:limit]
 
 
 @lru_cache(maxsize=1)

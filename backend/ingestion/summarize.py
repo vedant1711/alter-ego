@@ -69,7 +69,7 @@ async def _compact(session_id: str, source_type: str) -> MemoryRecord | None:
     await store.add([record], [vector])
 
     # Only retire the originals once the summary is safely stored.
-    await store.set_summarized([r.id for r in batch])
+    await store.set_summarized(session_id, [r.id for r in batch])
     get_keyword_store().invalidate(session_id)
 
     log.info(
