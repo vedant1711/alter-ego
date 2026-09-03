@@ -1,39 +1,106 @@
-import { useEffect, useState } from "react";
-import { health } from "./api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { chat, createSession, health } from "./api";
+import ChatPanel from "./components/ChatPanel";
+import type { ChatMessage } from "./types";
 
-type Status = "warming" | "ok" | "down";
+type Boot = "warming" | "ready" | "failed";
+
+let idSeq = 0;
+const nextId = () => `m${++idSeq}`;
 
 export default function App() {
-  const [status, setStatus] = useState<Status>("warming");
+  const [boot, setBoot] = useState<Boot>("warming");
+  const [offline, setOffline] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [busy, setBusy] = useState(false);
+  const sessionId = useRef<string | null>(null);
 
   useEffect(() => {
-    health()
-      .then(() => setStatus("ok"))
-      .catch(() => setStatus("down"));
+    let cancelled = false;
+    (async () => {
+      try {
+        // Render Free sleeps after 15 min idle; this ping absorbs the cold start.
+        const h = await health();
+        const sid = await createSession();
+        if (cancelled) return;
+        sessionId.current = sid;
+        setOffline(h.offline);
+        setBoot("ready");
+      } catch {
+        if (!cancelled) setBoot("failed");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const send = useCallback(async (text: string) => {
+    const sid = sessionId.current;
+    if (!sid) return;
+
+    const replyId = nextId();
+    setMessages((prev) => [
+      ...prev,
+      { id: nextId(), role: "user", text },
+      { id: replyId, role: "twin", text: "", streaming: true },
+    ]);
+    setBusy(true);
+
+    const patch = (fn: (m: ChatMessage) => ChatMessage) =>
+      setMessages((prev) => prev.map((m) => (m.id === replyId ? fn(m) : m)));
+
+    try {
+      await chat(sid, text, {
+        onToken: (chunk) => patch((m) => ({ ...m, text: m.text + chunk })),
+        onError: (msg) => patch((m) => ({ ...m, text: msg, error: true })),
+      });
+    } catch (err) {
+      patch((m) => ({ ...m, text: String(err), error: true }));
+    } finally {
+      patch((m) => ({ ...m, streaming: false }));
+      setBusy(false);
+    }
   }, []);
 
   return (
-    <div className="flex h-full items-center justify-center">
-      <div className="text-center">
-        <h1 className="text-4xl font-semibold tracking-tight text-white">ALTER EGO</h1>
-        <p className="mt-2 text-sm text-ink-400">
-          A digital twin with hybrid graph + vector + keyword memory.
+    <div className="mx-auto flex h-full max-w-3xl flex-col">
+      <header className="flex items-center justify-between px-5 py-4">
+        <div>
+          <h1 className="text-lg font-semibold tracking-tight text-white">ALTER EGO</h1>
+          <p className="text-xs text-ink-400">
+            A digital twin with hybrid graph + vector + keyword memory.
+          </p>
+        </div>
+        <StatusDot boot={boot} />
+      </header>
+
+      {offline && (
+        <p className="mx-5 mb-3 rounded-lg border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
+          Offline mode — no <code>GEMINI_API_KEY</code> is configured, so replies are templated
+          rather than generated.
         </p>
-        <p className="mt-6 text-sm">
-          backend:{" "}
-          <span
-            className={
-              status === "ok"
-                ? "text-accent-soft"
-                : status === "down"
-                  ? "text-red-400"
-                  : "text-ink-400"
-            }
-          >
-            {status === "warming" ? "waking up…" : status}
-          </span>
-        </p>
-      </div>
+      )}
+
+      <main className="min-h-0 flex-1 border-t border-ink-800">
+        <ChatPanel
+          messages={messages}
+          busy={busy}
+          disabled={boot !== "ready"}
+          onSend={send}
+        />
+      </main>
     </div>
+  );
+}
+
+function StatusDot({ boot }: { boot: Boot }) {
+  const label = boot === "warming" ? "waking backend…" : boot === "ready" ? "connected" : "backend unreachable";
+  const color = boot === "ready" ? "bg-accent" : boot === "failed" ? "bg-red-500" : "bg-ink-600 animate-pulse";
+  return (
+    <span className="flex items-center gap-2 text-xs text-ink-400">
+      <span className={`h-2 w-2 rounded-full ${color}`} />
+      {label}
+    </span>
   );
 }
