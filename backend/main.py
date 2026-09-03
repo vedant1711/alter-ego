@@ -17,7 +17,9 @@ from backend.deps import get_llm
 from backend.ingestion.embed import embed_one
 from backend.ingestion.extract import extract
 from backend.memory.graph_store import GraphDelta, get_graph_store
+from backend.memory.keyword_store import get_keyword_store
 from backend.memory.vector_store import MemoryRecord, get_vector_store
+from backend.retrieval.hybrid import estimate_tokens, retrieve
 from backend.schemas import ChatIn, IngestIn, IngestOut, RetrievedMemory, SessionOut
 
 logging.basicConfig(level=logging.INFO)
@@ -38,7 +40,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="ALTER EGO",
     description="A digital twin with hybrid (graph + vector + keyword) memory.",
-    version="0.3.0",
+    version="0.4.0",
     lifespan=lifespan,
 )
 
@@ -89,6 +91,9 @@ async def chat(body: ChatIn) -> EventSourceResponse:
 
     hits = await retrieve(body.session_id, body.message)
     prompt = build_prompt(body.message, hits)
+    log.info(
+        "chat: %d memories retrieved (~%d tokens of context)", len(hits), estimate_tokens(hits)
+    )
 
     async def events() -> AsyncIterator[dict[str, str]]:
         try:
@@ -132,42 +137,10 @@ async def remember(
 
     entities, relationships = await extract(clean)
     delta = await get_graph_store().add(session_id, entities, relationships)
+
+    # New text means the BM25 index for this session is stale.
+    get_keyword_store().invalidate(session_id)
     return record, delta
-
-
-async def retrieve(session_id: str, query: str) -> list[RetrievedMemory]:
-    """Phase 3: semantic recall plus graph traversal. Phase 4 adds keyword + rerank."""
-    out: list[RetrievedMemory] = []
-
-    vector = await embed_one(query)
-    for hit in await get_vector_store().search(session_id, vector, settings.retrieval_top_k):
-        out.append(
-            RetrievedMemory(
-                text=hit.record.text,
-                source=["vector"],
-                score=round(hit.score, 4),
-                source_type=hit.record.source_type,
-            )
-        )
-
-    store = get_graph_store()
-    seeds = select_seeds(query, await store.entity_keys(session_id))
-    if seeds:
-        for triple in await store.neighbourhood(session_id, seeds):
-            out.append(
-                RetrievedMemory(text=triple, source=["graph"], score=1.0, source_type="graph")
-            )
-
-    return out
-
-
-def select_seeds(query: str, entities: dict[str, str]) -> list[str]:
-    """Entities named in the query seed the traversal; 'User' anchors it otherwise."""
-    lowered = query.lower()
-    seeds = [key for key, name in entities.items() if name and name.lower() in lowered]
-    if not seeds and "user" in entities:
-        seeds = ["user"]
-    return seeds[:6]
 
 
 def build_prompt(message: str, hits: list[RetrievedMemory]) -> str:
