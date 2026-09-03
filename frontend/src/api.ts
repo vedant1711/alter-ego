@@ -21,6 +21,26 @@ export async function health(): Promise<Health> {
   return res.json();
 }
 
+/**
+ * Wake the backend, retrying while it boots.
+ *
+ * Render Free suspends a service after 15 minutes idle, and the first request
+ * back pays a 10-30s cold start that often shows up as a failed fetch rather
+ * than a slow one — so this retries instead of giving up.
+ */
+export async function warmUp(attempts = 6, delayMs = 4000): Promise<Health> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await health();
+    } catch (err) {
+      lastError = err;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastError;
+}
+
 export async function createSession(): Promise<string> {
   const res = await fetch(url("/session"), { method: "POST" });
   if (!res.ok) throw new Error(`session failed: ${res.status}`);

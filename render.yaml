@@ -1,0 +1,52 @@
+# Render Blueprint for the ALTER EGO backend.
+# New → Blueprint → point at this repo. Secrets are marked sync:false, so
+# Render prompts for them instead of storing them here.
+services:
+  - type: web
+    name: alter-ego-api
+    runtime: python
+    plan: free
+    # Free instances sleep after 15 minutes idle; the frontend warms them up
+    # with /api/health on page load.
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      # Must be a Python version Render offers; 3.11+ is required.
+      - key: PYTHON_VERSION
+        value: "3.13.1"
+
+      # --- Secrets: set these in the Render dashboard ---
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: NEO4J_URI
+        sync: false
+      - key: NEO4J_PASSWORD
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: FERNET_KEY
+        sync: false
+      # The deployed frontend's origin, e.g. https://alter-ego.vercel.app
+      - key: FRONTEND_ORIGIN
+        sync: false
+
+      # --- Non-secret configuration ---
+      - key: GEMINI_CHAT_MODEL
+        value: gemini-2.5-flash
+      - key: GEMINI_EMBED_MODEL
+        value: gemini-embedding-001
+      - key: EMBED_DIM
+        value: "768"
+      - key: NEO4J_USERNAME
+        value: neo4j
+      - key: QDRANT_COLLECTION
+        value: memories
+      - key: RATE_LIMIT_PER_MIN
+        value: "8"
+      - key: MAX_MESSAGE_CHARS
+        value: "2000"
+      - key: MAX_REQUESTS_PER_SESSION
+        value: "60"

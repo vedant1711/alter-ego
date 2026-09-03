@@ -3,9 +3,9 @@ import {
   chat,
   createSession,
   getGraph,
-  health,
   ingest,
   loadExample,
+  warmUp,
   type IngestSource,
 } from "./api";
 import ChatPanel from "./components/ChatPanel";
@@ -30,12 +30,14 @@ export default function App() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const sessionId = useRef<string | null>(null);
 
+  const [attempt, setAttempt] = useState(0);
+
   useEffect(() => {
     let cancelled = false;
+    setBoot("warming");
     (async () => {
       try {
-        // Render Free sleeps after 15 min idle; this ping absorbs the cold start.
-        const h = await health();
+        const h = await warmUp();
         const sid = await createSession();
         if (cancelled) return;
         sessionId.current = sid;
@@ -48,7 +50,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [attempt]);
 
   const refreshGraph = useCallback(async () => {
     const sid = sessionId.current;
@@ -135,8 +137,20 @@ export default function App() {
         </p>
       )}
 
-      <main className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[20rem_1fr_22rem]">
-        <div className="min-h-0 border-ink-800 lg:border-r">
+      {boot === "failed" && (
+        <div className="shrink-0 border-b border-red-900/60 bg-red-950/30 px-5 py-2 text-xs text-red-300">
+          Could not reach the backend. It may still be waking up from sleep.{" "}
+          <button
+            onClick={() => setAttempt((n) => n + 1)}
+            className="underline underline-offset-2 hover:text-red-200"
+          >
+            Try again
+          </button>
+        </div>
+      )}
+
+      <main className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[20rem_1fr_22rem] lg:overflow-hidden">
+        <div className="min-h-0 border-b border-ink-800 lg:border-r lg:border-b-0">
           <Onboarding
             disabled={notReady}
             onIngest={addMemory}
@@ -144,7 +158,7 @@ export default function App() {
             onLoadExample={seedExample}
           />
         </div>
-        <div className="min-h-0">
+        <div className="min-h-[70vh] lg:min-h-0">
           <ChatPanel
             messages={messages}
             busy={busy}
@@ -153,7 +167,7 @@ export default function App() {
             onSend={send}
           />
         </div>
-        <aside className="flex min-h-0 flex-col divide-y divide-ink-800 overflow-y-auto border-ink-800 lg:border-l">
+        <aside className="flex min-h-0 flex-col divide-y divide-ink-800 border-t border-ink-800 lg:overflow-y-auto lg:border-t-0 lg:border-l">
           <GraphView data={graph} />
           <RetrievedMemories memories={retrieved} />
         </aside>
@@ -164,7 +178,11 @@ export default function App() {
 
 function StatusDot({ boot }: { boot: Boot }) {
   const label =
-    boot === "warming" ? "waking backend…" : boot === "ready" ? "connected" : "backend unreachable";
+    boot === "warming"
+      ? "waking backend…"
+      : boot === "ready"
+        ? "connected"
+        : "backend unreachable";
   const color =
     boot === "ready" ? "bg-accent" : boot === "failed" ? "bg-red-500" : "bg-ink-600 animate-pulse";
   return (

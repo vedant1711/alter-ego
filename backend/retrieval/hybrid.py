@@ -81,7 +81,42 @@ async def retrieve(session_id: str, query: str) -> list[RetrievedMemory]:
             candidate.fused += weight / (RRF_K + rank + 1)
 
     ordered = sorted(merged.values(), key=lambda c: c.fused, reverse=True)
-    return _cap(ordered, settings.retrieval_top_k, settings.max_context_chars)
+    covered = _ensure_leg_coverage(ordered, settings.retrieval_top_k)
+    return _cap(covered, settings.retrieval_top_k, settings.max_context_chars)
+
+
+def _ensure_leg_coverage(ordered: list[Candidate], top_k: int) -> list[Candidate]:
+    """Give every leg that found something at least one slot in the final set.
+
+    RRF rewards agreement between legs, which systematically buries the leg
+    whose results overlap least with the others — in practice the graph, whose
+    terse triples share little vocabulary with the verbatim memories. Left
+    alone, a well-stocked session can fill every slot with vector+keyword
+    double-hits and silently drop the structural facts entirely.
+
+    So each unrepresented leg promotes its best candidate, displacing the
+    weakest selected memory whose own legs are still covered without it.
+    """
+    selected = ordered[:top_k]
+    pool = ordered[top_k:]
+    if not pool:
+        return selected
+
+    for leg in LEG_WEIGHTS:
+        if any(leg in c.legs for c in selected):
+            continue
+        promote = next((c for c in pool if leg in c.legs), None)
+        if promote is None:
+            continue
+        for i in range(len(selected) - 1, -1, -1):
+            others = selected[:i] + selected[i + 1 :]
+            if all(any(l in c.legs for c in others) for l in selected[i].legs):
+                selected[i] = promote
+                pool.remove(promote)
+                break
+
+    selected.sort(key=lambda c: c.fused, reverse=True)
+    return selected
 
 
 def _cap(candidates: list[Candidate], top_k: int, max_chars: int) -> list[RetrievedMemory]:

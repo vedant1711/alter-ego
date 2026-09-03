@@ -1,0 +1,12 @@
+# Netlify build for the frontend. Set VITE_API_BASE to the Render URL in the
+# site's environment variables before the first deploy.
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = "dist"
+
+# Single-page app: every path serves index.html.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

@@ -50,7 +50,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="ALTER EGO",
     description="A digital twin with hybrid (graph + vector + keyword) memory.",
-    version="0.8.0",
+    version="1.0.0",
     lifespan=lifespan,
 )
 
@@ -161,7 +161,6 @@ async def chat(body: ChatIn) -> EventSourceResponse:
         delta = GraphDelta([], [])
         try:
             _, delta = await remember(body.session_id, body.message, "message")
-            state.message_count += 1
             state.record_turn(body.message, "".join(reply).strip())
         except Exception:  # noqa: BLE001 - a failed write must not break the reply
             log.exception("failed to persist message memory")
