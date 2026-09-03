@@ -56,8 +56,39 @@ export async function ingest(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ session_id: sessionId, text, source }),
   });
-  if (!res.ok) throw new Error((await res.text()) || `ingest failed: ${res.status}`);
+  if (!res.ok) throw new Error(await detail(res));
   return res.json();
+}
+
+export interface ExamplePersona {
+  name: string;
+  tagline: string;
+  memories_added: number;
+  entities_added: number;
+  relationships_added: number;
+  suggested_questions: string[];
+  already_loaded: boolean;
+}
+
+export async function loadExample(sessionId: string): Promise<ExamplePersona> {
+  const res = await fetch(url("/load-example"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId }),
+  });
+  if (!res.ok) throw new Error(await detail(res));
+  return res.json();
+}
+
+/** Surface the backend's own message (rate limits, length caps) when it sends one. */
+async function detail(res: Response): Promise<string> {
+  try {
+    const body = await res.json();
+    if (typeof body?.detail === "string") return body.detail;
+  } catch {
+    // fall through to the status code
+  }
+  return `Request failed: ${res.status}`;
 }
 
 export interface ChatHandlers {
@@ -86,8 +117,7 @@ export async function chat(
   });
 
   if (!res.ok || !res.body) {
-    const detail = await res.text().catch(() => "");
-    throw new Error(detail || `chat failed: ${res.status}`);
+    throw new Error(await detail(res));
   }
 
   const reader = res.body.getReader();

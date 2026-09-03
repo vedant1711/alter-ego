@@ -6,7 +6,17 @@ interface Props {
   onIngest: (text: string, source: IngestSource) => Promise<void>;
 }
 
-export default function Onboarding({ disabled, onIngest }: Props) {
+interface OnboardingProps extends Props {
+  exampleLoaded: boolean;
+  onLoadExample: () => Promise<void>;
+}
+
+export default function Onboarding({
+  disabled,
+  onIngest,
+  exampleLoaded,
+  onLoadExample,
+}: OnboardingProps) {
   return (
     <section className="flex h-full min-h-0 flex-col overflow-y-auto">
       <header className="border-b border-ink-800 px-5 py-3">
@@ -15,6 +25,18 @@ export default function Onboarding({ disabled, onIngest }: Props) {
       </header>
 
       <div className="space-y-5 px-5 py-5">
+        <ExampleButton
+          disabled={disabled}
+          loaded={exampleLoaded}
+          onLoad={onLoadExample}
+        />
+
+        <div className="flex items-center gap-3 text-[10px] tracking-wider text-ink-600 uppercase">
+          <span className="h-px flex-1 bg-ink-800" />
+          or build your own
+          <span className="h-px flex-1 bg-ink-800" />
+        </div>
+
         <IngestBox
           label="Writing samples"
           hint="Paste a few sentences you actually wrote — a message, a post, an email. The twin copies this tone."
@@ -34,6 +56,50 @@ export default function Onboarding({ disabled, onIngest }: Props) {
         <HowItWorks />
       </div>
     </section>
+  );
+}
+
+function ExampleButton({
+  disabled,
+  loaded,
+  onLoad,
+}: {
+  disabled: boolean;
+  loaded: boolean;
+  onLoad: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function click() {
+    if (busy || loaded) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onLoad();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <button
+        onClick={click}
+        disabled={disabled || busy || loaded}
+        className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-white transition hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {loaded ? "Example persona loaded" : busy ? "Loading persona…" : "Load example persona"}
+      </button>
+      <p className="mt-1.5 text-xs leading-relaxed text-ink-400">
+        {loaded
+          ? "Ask the twin anything — the graph and memory panel show how it answers."
+          : "Seeds a prebuilt twin with writing samples and facts already ingested. Fastest way to see this working."}
+      </p>
+      {error && <p className="mt-1.5 text-xs text-red-400">{error}</p>}
+    </div>
   );
 }
 

@@ -25,6 +25,9 @@ class SessionState:
     recent_requests: list[float] = field(default_factory=list)
     # Raw message count since the last summarization pass.
     message_count: int = 0
+    # Set once /load-example has seeded this session, so a double click does
+    # not ingest the persona twice.
+    example_loaded: bool = False
     # Short rolling transcript for conversational continuity. Long-term recall
     # is the retriever's job; this only keeps the last few turns coherent.
     recent_turns: list[tuple[str, str]] = field(default_factory=list)

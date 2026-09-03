@@ -3,11 +3,19 @@ no Qdrant server — the in-process backends stand in for all three."""
 
 from __future__ import annotations
 
-import pytest
-from fastapi.testclient import TestClient
+import os
 
-from backend import sessions
-from backend.main import app
+# Settings are cached at first import of backend.main, so the guardrail limits
+# have to be relaxed before that happens. Individual guardrail tests tighten
+# them again on the live Settings object.
+os.environ.setdefault("RATE_LIMIT_PER_MIN", "10000")
+os.environ.setdefault("MAX_REQUESTS_PER_SESSION", "10000")
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+from backend import sessions  # noqa: E402
+from backend.main import app  # noqa: E402
 
 
 @pytest.fixture

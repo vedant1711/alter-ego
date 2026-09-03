@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { chat, createSession, getGraph, health, ingest, type IngestSource } from "./api";
+import {
+  chat,
+  createSession,
+  getGraph,
+  health,
+  ingest,
+  loadExample,
+  type IngestSource,
+} from "./api";
 import ChatPanel from "./components/ChatPanel";
 import GraphView from "./components/GraphView";
 import Onboarding from "./components/Onboarding";
@@ -18,6 +26,8 @@ export default function App() {
   const [retrieved, setRetrieved] = useState<RetrievedMemory[]>([]);
   const [graph, setGraph] = useState<GraphData>({ nodes: [], edges: [] });
   const [busy, setBusy] = useState(false);
+  const [exampleLoaded, setExampleLoaded] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const sessionId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -60,6 +70,15 @@ export default function App() {
     [refreshGraph]
   );
 
+  const seedExample = useCallback(async () => {
+    const sid = sessionId.current;
+    if (!sid) throw new Error("no session");
+    const persona = await loadExample(sid);
+    setExampleLoaded(true);
+    setSuggestions(persona.suggested_questions);
+    await refreshGraph();
+  }, [refreshGraph]);
+
   const send = useCallback(async (text: string) => {
     const sid = sessionId.current;
     if (!sid) return;
@@ -71,6 +90,7 @@ export default function App() {
       { id: replyId, role: "twin", text: "", streaming: true },
     ]);
     setBusy(true);
+    setSuggestions([]);
 
     const patch = (fn: (m: ChatMessage) => ChatMessage) =>
       setMessages((prev) => prev.map((m) => (m.id === replyId ? fn(m) : m)));
@@ -117,10 +137,21 @@ export default function App() {
 
       <main className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[20rem_1fr_22rem]">
         <div className="min-h-0 border-ink-800 lg:border-r">
-          <Onboarding disabled={notReady} onIngest={addMemory} />
+          <Onboarding
+            disabled={notReady}
+            onIngest={addMemory}
+            exampleLoaded={exampleLoaded}
+            onLoadExample={seedExample}
+          />
         </div>
         <div className="min-h-0">
-          <ChatPanel messages={messages} busy={busy} disabled={notReady} onSend={send} />
+          <ChatPanel
+            messages={messages}
+            busy={busy}
+            disabled={notReady}
+            suggestions={suggestions}
+            onSend={send}
+          />
         </div>
         <aside className="flex min-h-0 flex-col divide-y divide-ink-800 overflow-y-auto border-ink-800 lg:border-l">
           <GraphView data={graph} />

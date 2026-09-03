@@ -28,6 +28,20 @@ class IngestOut(BaseModel):
     relationships_added: int = 0
 
 
+class LoadExampleIn(BaseModel):
+    session_id: str
+
+
+class LoadExampleOut(BaseModel):
+    name: str
+    tagline: str
+    memories_added: int
+    entities_added: int
+    relationships_added: int
+    suggested_questions: list[str]
+    already_loaded: bool = False
+
+
 class RetrievedMemory(BaseModel):
     text: str
     # A memory can surface from more than one retrieval leg, so this lists all

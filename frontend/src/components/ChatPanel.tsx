@@ -5,10 +5,11 @@ interface Props {
   messages: ChatMessage[];
   busy: boolean;
   disabled: boolean;
+  suggestions: string[];
   onSend: (text: string) => void;
 }
 
-export default function ChatPanel({ messages, busy, disabled, onSend }: Props) {
+export default function ChatPanel({ messages, busy, disabled, suggestions, onSend }: Props) {
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -36,11 +37,31 @@ export default function ChatPanel({ messages, busy, disabled, onSend }: Props) {
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
         {messages.length === 0 && (
           <div className="mx-auto mt-16 max-w-sm text-center text-sm text-ink-400">
-            <p className="text-ink-200">Nothing in memory yet.</p>
-            <p className="mt-2">
-              Load the example persona on the left, or add a writing sample and a few facts,
-              then say hello.
-            </p>
+            {suggestions.length > 0 ? (
+              <>
+                <p className="text-ink-200">The twin is ready. Try asking:</p>
+                <div className="mt-4 flex flex-col gap-2">
+                  {suggestions.map((q) => (
+                    <button
+                      key={q}
+                      onClick={() => !busy && !disabled && onSend(q)}
+                      disabled={busy || disabled}
+                      className="rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-left text-xs text-ink-200 transition hover:border-accent hover:text-white disabled:opacity-40"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-ink-200">Nothing in memory yet.</p>
+                <p className="mt-2">
+                  Load the example persona on the left, or add a writing sample and a few facts,
+                  then say hello.
+                </p>
+              </>
+            )}
           </div>
         )}
 

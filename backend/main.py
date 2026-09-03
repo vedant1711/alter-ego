@@ -11,18 +11,26 @@ from fastapi import APIRouter, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
-from backend import sessions
+from backend import persona, sessions
 from backend.config import get_settings
 from backend.deps import get_llm
+from backend.guardrails import enforce
 from backend.generation.style_transfer import build_prompt, fetch_style_samples
-from backend.ingestion.embed import embed_one
+from backend.ingestion.embed import embed_one, embed_texts
 from backend.ingestion.extract import extract
 from backend.ingestion.summarize import maybe_summarize
 from backend.memory.graph_store import GraphDelta, get_graph_store
 from backend.memory.keyword_store import get_keyword_store
 from backend.memory.vector_store import MemoryRecord, get_vector_store
 from backend.retrieval.hybrid import estimate_tokens, retrieve
-from backend.schemas import ChatIn, IngestIn, IngestOut, SessionOut
+from backend.schemas import (
+    ChatIn,
+    IngestIn,
+    IngestOut,
+    LoadExampleIn,
+    LoadExampleOut,
+    SessionOut,
+)
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("alter_ego")
@@ -42,7 +50,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="ALTER EGO",
     description="A digital twin with hybrid (graph + vector + keyword) memory.",
-    version="0.7.0",
+    version="0.8.0",
     lifespan=lifespan,
 )
 
@@ -72,7 +80,8 @@ def create_session() -> SessionOut:
 
 @api.post("/ingest", response_model=IngestOut)
 async def ingest(body: IngestIn) -> IngestOut:
-    sessions.get_or_create(body.session_id)
+    state = sessions.get_or_create(body.session_id)
+    enforce(state, text=body.text)
     record, delta = await remember(body.session_id, body.text, body.source)
     entities, relations = delta.counts
     return IngestOut(
@@ -86,10 +95,46 @@ async def graph(session_id: str = Query(min_length=1)) -> dict[str, list[dict[st
     return (await get_graph_store().get_graph(session_id)).to_dict()
 
 
+@api.post("/load-example", response_model=LoadExampleOut)
+async def load_example(body: LoadExampleIn) -> LoadExampleOut:
+    """Seed the session with the bundled persona (FR9)."""
+    state = sessions.get_or_create(body.session_id)
+    profile = persona.load()
+
+    if state.example_loaded:
+        return LoadExampleOut(
+            name=profile["name"],
+            tagline=profile["tagline"],
+            memories_added=0,
+            entities_added=0,
+            relationships_added=0,
+            suggested_questions=profile["suggested_questions"],
+            already_loaded=True,
+        )
+
+    # Bulk loading costs about two model calls, so it is metered as two requests.
+    enforce(state, cost=2)
+    items = persona.texts()
+    delta = await remember_many(body.session_id, items)
+    state.example_loaded = True
+
+    entities, relationships = delta.counts
+    log.info("example persona loaded into session %s", body.session_id)
+    return LoadExampleOut(
+        name=profile["name"],
+        tagline=profile["tagline"],
+        memories_added=len(items),
+        entities_added=entities,
+        relationships_added=relationships,
+        suggested_questions=profile["suggested_questions"],
+    )
+
+
 @api.post("/chat")
 async def chat(body: ChatIn) -> EventSourceResponse:
     """Stream a reply as SSE: `token` events, then one terminal `meta` event."""
     state = sessions.get_or_create(body.session_id)
+    enforce(state, text=body.message)
 
     hits = await retrieve(body.session_id, body.message)
     samples = await fetch_style_samples(body.session_id)
@@ -159,6 +204,30 @@ async def remember(
     # New text means the BM25 index for this session is stale.
     get_keyword_store().invalidate(session_id)
     return record, delta
+
+
+async def remember_many(
+    session_id: str, items: list[tuple[str, str]]
+) -> GraphDelta:
+    """Ingest many texts using one batched embedding call and one extraction call.
+
+    Extracting each item separately would be more precise, but it would also be
+    one model call per item — a minute of wall clock against the free tier's
+    per-minute ceiling, on the very path a first-time visitor takes.
+    """
+    records = [
+        MemoryRecord(session_id=session_id, text=text.strip(), source_type=source)  # type: ignore[arg-type]
+        for text, source in items
+    ]
+    vectors = await embed_texts([r.text for r in records])
+    await get_vector_store().add(records, vectors)
+
+    facts = "\n".join(r.text for r in records if r.source_type == "fact")
+    entities, relationships = await extract(facts)
+    delta = await get_graph_store().add(session_id, entities, relationships)
+
+    get_keyword_store().invalidate(session_id)
+    return delta
 
 
 app.include_router(api)
