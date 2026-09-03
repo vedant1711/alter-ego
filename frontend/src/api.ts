@@ -1,5 +1,7 @@
 /** Thin client for the ALTER EGO backend. */
 
+import type { RetrievedMemory } from "./types";
+
 // Empty in dev: Vite proxies /api to the local backend (see vite.config.ts).
 // In production this is the Render URL, injected at build time.
 export const API_BASE = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "");
@@ -26,8 +28,30 @@ export async function createSession(): Promise<string> {
 }
 
 export interface ChatMeta {
-  retrieved_memories: unknown[];
+  retrieved_memories: RetrievedMemory[];
   graph_delta: unknown;
+}
+
+export type IngestSource = "sample" | "fact";
+
+export interface IngestResult {
+  memory_id: string;
+  entities_added: number;
+  relationships_added: number;
+}
+
+export async function ingest(
+  sessionId: string,
+  text: string,
+  source: IngestSource
+): Promise<IngestResult> {
+  const res = await fetch(url("/ingest"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, text, source }),
+  });
+  if (!res.ok) throw new Error((await res.text()) || `ingest failed: ${res.status}`);
+  return res.json();
 }
 
 export interface ChatHandlers {

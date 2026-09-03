@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { chat, createSession, health } from "./api";
+import { chat, createSession, health, ingest, type IngestSource } from "./api";
 import ChatPanel from "./components/ChatPanel";
-import type { ChatMessage } from "./types";
+import Onboarding from "./components/Onboarding";
+import RetrievedMemories from "./components/RetrievedMemories";
+import type { ChatMessage, RetrievedMemory } from "./types";
 
 type Boot = "warming" | "ready" | "failed";
 
@@ -12,6 +14,7 @@ export default function App() {
   const [boot, setBoot] = useState<Boot>("warming");
   const [offline, setOffline] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [retrieved, setRetrieved] = useState<RetrievedMemory[]>([]);
   const [busy, setBusy] = useState(false);
   const sessionId = useRef<string | null>(null);
 
@@ -35,6 +38,12 @@ export default function App() {
     };
   }, []);
 
+  const addMemory = useCallback(async (text: string, source: IngestSource) => {
+    const sid = sessionId.current;
+    if (!sid) throw new Error("no session");
+    await ingest(sid, text, source);
+  }, []);
+
   const send = useCallback(async (text: string) => {
     const sid = sessionId.current;
     if (!sid) return;
@@ -53,6 +62,7 @@ export default function App() {
     try {
       await chat(sid, text, {
         onToken: (chunk) => patch((m) => ({ ...m, text: m.text + chunk })),
+        onMeta: (meta) => setRetrieved(meta.retrieved_memories ?? []),
         onError: (msg) => patch((m) => ({ ...m, text: msg, error: true })),
       });
     } catch (err) {
@@ -63,11 +73,13 @@ export default function App() {
     }
   }, []);
 
+  const notReady = boot !== "ready";
+
   return (
-    <div className="mx-auto flex h-full max-w-3xl flex-col">
-      <header className="flex items-center justify-between px-5 py-4">
+    <div className="flex h-full flex-col">
+      <header className="flex shrink-0 items-center justify-between border-b border-ink-800 px-5 py-3">
         <div>
-          <h1 className="text-lg font-semibold tracking-tight text-white">ALTER EGO</h1>
+          <h1 className="text-base font-semibold tracking-tight text-white">ALTER EGO</h1>
           <p className="text-xs text-ink-400">
             A digital twin with hybrid graph + vector + keyword memory.
           </p>
@@ -76,27 +88,32 @@ export default function App() {
       </header>
 
       {offline && (
-        <p className="mx-5 mb-3 rounded-lg border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
+        <p className="shrink-0 border-b border-amber-900/60 bg-amber-950/30 px-5 py-2 text-xs text-amber-300">
           Offline mode — no <code>GEMINI_API_KEY</code> is configured, so replies are templated
           rather than generated.
         </p>
       )}
 
-      <main className="min-h-0 flex-1 border-t border-ink-800">
-        <ChatPanel
-          messages={messages}
-          busy={busy}
-          disabled={boot !== "ready"}
-          onSend={send}
-        />
+      <main className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[20rem_1fr_22rem]">
+        <div className="min-h-0 border-ink-800 lg:border-r">
+          <Onboarding disabled={notReady} onIngest={addMemory} />
+        </div>
+        <div className="min-h-0">
+          <ChatPanel messages={messages} busy={busy} disabled={notReady} onSend={send} />
+        </div>
+        <aside className="min-h-0 border-ink-800 lg:border-l">
+          <RetrievedMemories memories={retrieved} />
+        </aside>
       </main>
     </div>
   );
 }
 
 function StatusDot({ boot }: { boot: Boot }) {
-  const label = boot === "warming" ? "waking backend…" : boot === "ready" ? "connected" : "backend unreachable";
-  const color = boot === "ready" ? "bg-accent" : boot === "failed" ? "bg-red-500" : "bg-ink-600 animate-pulse";
+  const label =
+    boot === "warming" ? "waking backend…" : boot === "ready" ? "connected" : "backend unreachable";
+  const color =
+    boot === "ready" ? "bg-accent" : boot === "failed" ? "bg-red-500" : "bg-ink-600 animate-pulse";
   return (
     <span className="flex items-center gap-2 text-xs text-ink-400">
       <span className={`h-2 w-2 rounded-full ${color}`} />
