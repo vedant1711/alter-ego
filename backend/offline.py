@@ -126,8 +126,9 @@ def _offline_summary(prompt: str) -> str:
 
 def _offline_reply(prompt: str) -> str:
     message = _extract_block(prompt, "New message:").split("\n")[0].strip()
-    context = _extract_block(prompt, "GROUND YOUR REPLY in these retrieved memories (do not invent facts):")
-    facts = [ln.strip("- ").strip() for ln in context.splitlines() if ln.strip()][:3]
+    context = _extract_block(prompt, "GROUND YOUR REPLY")
+    # Only the bulleted memories, not the instruction sentence that precedes them.
+    facts = [ln.strip()[2:].strip() for ln in context.splitlines() if ln.strip().startswith("- ")][:3]
     if facts:
         recalled = " ".join(f"I remember: {f}" for f in facts)
         return (

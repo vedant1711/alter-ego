@@ -25,6 +25,13 @@ class SessionState:
     recent_requests: list[float] = field(default_factory=list)
     # Raw message count since the last summarization pass.
     message_count: int = 0
+    # Short rolling transcript for conversational continuity. Long-term recall
+    # is the retriever's job; this only keeps the last few turns coherent.
+    recent_turns: list[tuple[str, str]] = field(default_factory=list)
+
+    def record_turn(self, user_text: str, twin_text: str, keep: int = 4) -> None:
+        self.recent_turns.append((user_text, twin_text))
+        del self.recent_turns[:-keep]
 
 
 _SESSIONS: dict[str, SessionState] = {}

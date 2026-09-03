@@ -14,13 +14,14 @@ from sse_starlette.sse import EventSourceResponse
 from backend import sessions
 from backend.config import get_settings
 from backend.deps import get_llm
+from backend.generation.style_transfer import build_prompt, fetch_style_samples
 from backend.ingestion.embed import embed_one
 from backend.ingestion.extract import extract
 from backend.memory.graph_store import GraphDelta, get_graph_store
 from backend.memory.keyword_store import get_keyword_store
 from backend.memory.vector_store import MemoryRecord, get_vector_store
 from backend.retrieval.hybrid import estimate_tokens, retrieve
-from backend.schemas import ChatIn, IngestIn, IngestOut, RetrievedMemory, SessionOut
+from backend.schemas import ChatIn, IngestIn, IngestOut, SessionOut
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("alter_ego")
@@ -40,7 +41,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="ALTER EGO",
     description="A digital twin with hybrid (graph + vector + keyword) memory.",
-    version="0.4.0",
+    version="0.5.0",
     lifespan=lifespan,
 )
 
@@ -90,14 +91,20 @@ async def chat(body: ChatIn) -> EventSourceResponse:
     state = sessions.get_or_create(body.session_id)
 
     hits = await retrieve(body.session_id, body.message)
-    prompt = build_prompt(body.message, hits)
+    samples = await fetch_style_samples(body.session_id)
+    prompt = build_prompt(body.message, hits, samples, state)
     log.info(
-        "chat: %d memories retrieved (~%d tokens of context)", len(hits), estimate_tokens(hits)
+        "chat: %d memories, %d style samples (~%d tokens of context)",
+        len(hits),
+        len(samples),
+        estimate_tokens(hits),
     )
 
     async def events() -> AsyncIterator[dict[str, str]]:
+        reply: list[str] = []
         try:
             async for chunk in get_llm().stream(prompt):
+                reply.append(chunk)
                 yield {"event": "token", "data": json.dumps({"text": chunk})}
         except Exception as exc:  # noqa: BLE001 - surface any provider failure to the UI
             log.exception("chat generation failed")
@@ -109,6 +116,7 @@ async def chat(body: ChatIn) -> EventSourceResponse:
         try:
             _, delta = await remember(body.session_id, body.message, "message")
             state.message_count += 1
+            state.record_turn(body.message, "".join(reply).strip())
         except Exception:  # noqa: BLE001 - a failed write must not break the reply
             log.exception("failed to persist message memory")
 
@@ -141,17 +149,6 @@ async def remember(
     # New text means the BM25 index for this session is stale.
     get_keyword_store().invalidate(session_id)
     return record, delta
-
-
-def build_prompt(message: str, hits: list[RetrievedMemory]) -> str:
-    context = "\n".join(f"- {h.text}" for h in hits) or "(nothing remembered yet)"
-    return (
-        "You are the user's digital twin. Reply to the new message AS the user, in first person.\n"
-        "Keep it to a few sentences. Do not mention that you are an AI or a twin.\n\n"
-        "GROUND YOUR REPLY in these retrieved memories (do not invent facts):\n"
-        f"{context}\n\n"
-        f"New message: {message}"
-    )
 
 
 app.include_router(api)
