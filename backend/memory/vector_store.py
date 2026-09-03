@@ -168,6 +168,17 @@ class VectorStore:
         records.sort(key=lambda r: r.created_at)
         return records
 
+    async def set_summarized(self, ids: list[str]) -> None:
+        """Mark records as folded into a summary, which drops them from recall."""
+        if not ids:
+            return
+        await self.ensure_ready()
+        await self._client.set_payload(
+            self._collection,
+            payload={"summarized": True},
+            points=ids,
+        )
+
     async def delete_session(self, session_id: str) -> None:
         await self.ensure_ready()
         await self._client.delete(

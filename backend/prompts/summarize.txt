@@ -1,0 +1,6 @@
+Summarize the following memories about the user into a compact third-person profile note.
+Preserve concrete facts, names, places, preferences, projects and relationships exactly as
+stated. Omit greetings, filler, and anything the user only asked about rather than asserted.
+Write 4 sentences maximum, no bullet points, no preamble.
+
+Memories: """{batch}"""

@@ -17,6 +17,7 @@ from backend.deps import get_llm
 from backend.generation.style_transfer import build_prompt, fetch_style_samples
 from backend.ingestion.embed import embed_one
 from backend.ingestion.extract import extract
+from backend.ingestion.summarize import maybe_summarize
 from backend.memory.graph_store import GraphDelta, get_graph_store
 from backend.memory.keyword_store import get_keyword_store
 from backend.memory.vector_store import MemoryRecord, get_vector_store
@@ -41,7 +42,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title="ALTER EGO",
     description="A digital twin with hybrid (graph + vector + keyword) memory.",
-    version="0.5.0",
+    version="0.6.0",
     lifespan=lifespan,
 )
 
@@ -129,6 +130,15 @@ async def chat(body: ChatIn) -> EventSourceResponse:
                 }
             ),
         }
+
+        # Compaction runs after the client has the whole reply, so its LLM call
+        # never sits between the last token and the memory panel updating. If
+        # the client disconnected first this is skipped, and the next turn
+        # retries — the threshold is still exceeded.
+        try:
+            await maybe_summarize(body.session_id)
+        except Exception:  # noqa: BLE001 - never let compaction break a turn
+            log.exception("summarization pass failed")
 
     return EventSourceResponse(events())
 
