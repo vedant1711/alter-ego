@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { chat, createSession, health, ingest, type IngestSource } from "./api";
+import { chat, createSession, getGraph, health, ingest, type IngestSource } from "./api";
 import ChatPanel from "./components/ChatPanel";
+import GraphView from "./components/GraphView";
 import Onboarding from "./components/Onboarding";
 import RetrievedMemories from "./components/RetrievedMemories";
-import type { ChatMessage, RetrievedMemory } from "./types";
+import type { ChatMessage, GraphData, RetrievedMemory } from "./types";
 
 type Boot = "warming" | "ready" | "failed";
 
@@ -15,6 +16,7 @@ export default function App() {
   const [offline, setOffline] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [retrieved, setRetrieved] = useState<RetrievedMemory[]>([]);
+  const [graph, setGraph] = useState<GraphData>({ nodes: [], edges: [] });
   const [busy, setBusy] = useState(false);
   const sessionId = useRef<string | null>(null);
 
@@ -38,11 +40,25 @@ export default function App() {
     };
   }, []);
 
-  const addMemory = useCallback(async (text: string, source: IngestSource) => {
+  const refreshGraph = useCallback(async () => {
     const sid = sessionId.current;
-    if (!sid) throw new Error("no session");
-    await ingest(sid, text, source);
+    if (!sid) return;
+    try {
+      setGraph(await getGraph(sid));
+    } catch {
+      // A failed refresh just leaves the last good graph on screen.
+    }
   }, []);
+
+  const addMemory = useCallback(
+    async (text: string, source: IngestSource) => {
+      const sid = sessionId.current;
+      if (!sid) throw new Error("no session");
+      await ingest(sid, text, source);
+      await refreshGraph();
+    },
+    [refreshGraph]
+  );
 
   const send = useCallback(async (text: string) => {
     const sid = sessionId.current;
@@ -62,7 +78,12 @@ export default function App() {
     try {
       await chat(sid, text, {
         onToken: (chunk) => patch((m) => ({ ...m, text: m.text + chunk })),
-        onMeta: (meta) => setRetrieved(meta.retrieved_memories ?? []),
+        onMeta: (meta) => {
+          setRetrieved(meta.retrieved_memories ?? []);
+          // The delta says whether the turn changed the graph at all.
+          const delta = meta.graph_delta;
+          if (delta && (delta.nodes.length > 0 || delta.edges.length > 0)) void refreshGraph();
+        },
         onError: (msg) => patch((m) => ({ ...m, text: msg, error: true })),
       });
     } catch (err) {
@@ -71,7 +92,7 @@ export default function App() {
       patch((m) => ({ ...m, streaming: false }));
       setBusy(false);
     }
-  }, []);
+  }, [refreshGraph]);
 
   const notReady = boot !== "ready";
 
@@ -101,7 +122,8 @@ export default function App() {
         <div className="min-h-0">
           <ChatPanel messages={messages} busy={busy} disabled={notReady} onSend={send} />
         </div>
-        <aside className="min-h-0 border-ink-800 lg:border-l">
+        <aside className="flex min-h-0 flex-col divide-y divide-ink-800 overflow-y-auto border-ink-800 lg:border-l">
+          <GraphView data={graph} />
           <RetrievedMemories memories={retrieved} />
         </aside>
       </main>

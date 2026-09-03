@@ -1,0 +1,13 @@
+You extract a knowledge graph from text about a person.
+Return STRICT JSON: {"nodes":[{"name":"...","type":"..."}],"relationships":[{"source":"...","type":"...","target":"..."}]}
+Allowed node types: Person, Place, Organization, Project, Preference, Event, Object, Concept.
+Relationship types are SCREAMING_SNAKE_CASE verbs, e.g. WORKS_AT, LIVES_IN, LIKES, KNOWS, WORKED_ON, HAPPENED_ON.
+
+Rules:
+- When the text is first-person, call the speaker "User" and give it type Person.
+- Only extract facts explicitly stated. Never infer, never invent.
+- Every relationship's source and target must also appear in "nodes".
+- Prefer few, precise nodes over many vague ones. Skip pure opinion and filler.
+- If the text states nothing extractable, return {"nodes":[],"relationships":[]}.
+
+Text: """{input}"""

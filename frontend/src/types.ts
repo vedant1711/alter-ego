@@ -15,3 +15,20 @@ export interface RetrievedMemory {
   /** How the memory was created: "sample" | "fact" | "message" | "summary". */
   source_type: string;
 }
+
+export interface GraphNode {
+  id: string;
+  label: string;
+  type: string;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  type: string;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}

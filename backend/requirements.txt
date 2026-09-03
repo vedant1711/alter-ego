@@ -6,3 +6,5 @@ python-dotenv==1.2.3
 sse-starlette==3.4.10
 google-genai==2.22.0
 qdrant-client==1.19.0
+neo4j==6.3.0
+networkx==3.6.1

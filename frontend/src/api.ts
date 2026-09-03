@@ -1,6 +1,6 @@
 /** Thin client for the ALTER EGO backend. */
 
-import type { RetrievedMemory } from "./types";
+import type { GraphData, RetrievedMemory } from "./types";
 
 // Empty in dev: Vite proxies /api to the local backend (see vite.config.ts).
 // In production this is the Render URL, injected at build time.
@@ -29,7 +29,13 @@ export async function createSession(): Promise<string> {
 
 export interface ChatMeta {
   retrieved_memories: RetrievedMemory[];
-  graph_delta: unknown;
+  graph_delta: GraphData | null;
+}
+
+export async function getGraph(sessionId: string): Promise<GraphData> {
+  const res = await fetch(`${url("/graph")}?session_id=${encodeURIComponent(sessionId)}`);
+  if (!res.ok) throw new Error(`graph failed: ${res.status}`);
+  return res.json();
 }
 
 export type IngestSource = "sample" | "fact";

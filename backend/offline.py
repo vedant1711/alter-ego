@@ -89,7 +89,7 @@ def _offline_extraction(prompt: str) -> str:
     ]
     for pattern, node_type, rel_type in patterns:
         for match in re.finditer(pattern, text):
-            name = match.group(1).strip().rstrip(".,;:").split(" and ")[0].strip()
+            name = _trim_entity(match.group(1))
             if not name or name.lower() in _STOPWORDS or len(name) < 2:
                 continue
             if name.lower() not in seen:
@@ -107,6 +107,14 @@ def _offline_extraction(prompt: str) -> str:
         rels.append({"source": "User", "type": "MENTIONS", "target": name})
 
     return json.dumps({"nodes": nodes, "relationships": rels})
+
+
+def _trim_entity(raw: str) -> str:
+    """Cut a greedy capture at the first connective, e.g. "Acme as a designer" -> "Acme"."""
+    name = raw.strip().rstrip(".,;:!?")
+    for connective in (" as ", " and ", " in ", " for ", " with ", " on ", " to ", " but "):
+        name = name.split(connective)[0]
+    return name.strip()
 
 
 def _offline_summary(prompt: str) -> str:
