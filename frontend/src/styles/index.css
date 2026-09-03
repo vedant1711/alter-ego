@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink-950: #08090d;
+  --color-ink-900: #0d0f15;
+  --color-ink-850: #12141c;
+  --color-ink-800: #171a24;
+  --color-ink-700: #232734;
+  --color-ink-600: #333849;
+  --color-ink-400: #7d859c;
+  --color-ink-200: #c3c9d8;
+  --color-accent: #7c5cff;
+  --color-accent-soft: #a58dff;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-ink-950);
+  color: var(--color-ink-200);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Slim scrollbars so the three panes stay visually quiet. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ink-700) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--color-ink-700);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
