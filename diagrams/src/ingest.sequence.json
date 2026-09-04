@@ -1,0 +1,217 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "ALTER EGO \u2014 Ingesting One Memory",
+    "output": "../ingest.html",
+    "viewBox": [
+      900,
+      820
+    ],
+    "animation": "trace",
+    "quality_profile": "showcase",
+    "visual_preset": "editorial",
+    "column_fit": "spread",
+    "views": [
+      {
+        "id": "meter",
+        "label": "Meter first",
+        "focus": [
+          "browser",
+          "api"
+        ],
+        "note": "The session's budget is checked before any model quota is spent."
+      },
+      {
+        "id": "parse",
+        "label": "Parse into memory",
+        "focus": [
+          "api",
+          "gemini",
+          "graph"
+        ],
+        "note": "One text becomes both a vector and a set of typed graph edges."
+      },
+      {
+        "id": "persist",
+        "label": "Encrypt and persist",
+        "focus": [
+          "api",
+          "vault",
+          "qdrant",
+          "bm25"
+        ],
+        "note": "Text is encrypted before storage; the keyword index is invalidated, not rebuilt."
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "browser",
+      "type": "external",
+      "label": "Browser",
+      "sublabel": "onboarding pane"
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "FastAPI",
+      "sublabel": "/api/ingest"
+    },
+    {
+      "id": "gemini",
+      "type": "cloud",
+      "label": "Gemini",
+      "sublabel": "flash-lite"
+    },
+    {
+      "id": "vault",
+      "type": "security",
+      "label": "Vault",
+      "sublabel": "per-session key"
+    },
+    {
+      "id": "qdrant",
+      "type": "database",
+      "label": "Qdrant",
+      "sublabel": "vectors"
+    },
+    {
+      "id": "graph",
+      "type": "database",
+      "label": "Neo4j",
+      "sublabel": "graph"
+    },
+    {
+      "id": "bm25",
+      "type": "backend",
+      "label": "BM25",
+      "sublabel": "in-process"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 260,
+      "label": "Meter"
+    },
+    {
+      "from": 278,
+      "to": 470,
+      "label": "Parse"
+    },
+    {
+      "from": 488,
+      "to": 700,
+      "label": "Persist"
+    }
+  ],
+  "messages": [
+    {
+      "from": "browser",
+      "to": "api",
+      "y": 182,
+      "label": "POST text + source",
+      "variant": "emphasis"
+    },
+    {
+      "from": "api",
+      "to": "browser",
+      "y": 226,
+      "label": "413 / 429 if over budget",
+      "variant": "return"
+    },
+    {
+      "from": "api",
+      "to": "gemini",
+      "y": 300,
+      "label": "embed (768d, MRL)",
+      "variant": "emphasis"
+    },
+    {
+      "from": "gemini",
+      "to": "api",
+      "y": 344,
+      "label": "unit vector",
+      "variant": "return"
+    },
+    {
+      "from": "api",
+      "to": "gemini",
+      "y": 388,
+      "label": "extract entities + relations",
+      "variant": "emphasis"
+    },
+    {
+      "from": "gemini",
+      "to": "api",
+      "y": 432,
+      "label": "strict JSON",
+      "variant": "return"
+    },
+    {
+      "from": "api",
+      "to": "vault",
+      "y": 510,
+      "label": "encrypt text",
+      "variant": "security"
+    },
+    {
+      "from": "api",
+      "to": "qdrant",
+      "y": 554,
+      "label": "upsert ciphertext + vector",
+      "variant": "emphasis"
+    },
+    {
+      "from": "api",
+      "to": "graph",
+      "y": 598,
+      "label": "MERGE nodes and edges",
+      "variant": "emphasis"
+    },
+    {
+      "from": "api",
+      "to": "bm25",
+      "y": 642,
+      "label": "invalidate index",
+      "variant": "dashed"
+    },
+    {
+      "from": "api",
+      "to": "browser",
+      "y": 690,
+      "label": "entities + relationships added",
+      "variant": "return"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Two model calls per memory",
+      "items": [
+        "One embedding call and one extraction call",
+        "Loading the example persona batches all 14 into two calls",
+        "Guardrails run before either, so a rejected request costs no quota"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Encrypted before it leaves",
+      "items": [
+        "Encryption lives in the store's payload serialisation",
+        "No call site can write plaintext by forgetting to",
+        "Graph entity labels stay readable \u2014 a documented tradeoff"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Extraction is best-effort",
+      "items": [
+        "A failed or unparseable extraction never fails the ingest",
+        "Relationship types are sanitised before touching Cypher",
+        "Dangling and self edges are dropped, not stored"
+      ]
+    }
+  ]
+}

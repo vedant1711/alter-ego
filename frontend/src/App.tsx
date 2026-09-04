@@ -10,6 +10,7 @@ import {
 } from "./api";
 import ChatPanel from "./components/ChatPanel";
 import GraphView from "./components/GraphView";
+import HowItWorks from "./components/HowItWorks";
 import Onboarding from "./components/Onboarding";
 import RetrievedMemories from "./components/RetrievedMemories";
 import type { ChatMessage, GraphData, RetrievedMemory } from "./types";
@@ -27,6 +28,7 @@ export default function App() {
   const [graph, setGraph] = useState<GraphData>({ nodes: [], edges: [] });
   const [busy, setBusy] = useState(false);
   const [exampleLoaded, setExampleLoaded] = useState(false);
+  const [tab, setTab] = useState<"chat" | "how">("chat");
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const sessionId = useRef<string | null>(null);
 
@@ -93,6 +95,7 @@ export default function App() {
     ]);
     setBusy(true);
     setSuggestions([]);
+    setTab("chat");
 
     const patch = (fn: (m: ChatMessage) => ChatMessage) =>
       setMessages((prev) => prev.map((m) => (m.id === replyId ? fn(m) : m)));
@@ -158,14 +161,31 @@ export default function App() {
             onLoadExample={seedExample}
           />
         </div>
-        <div className="min-h-[70vh] lg:min-h-0">
-          <ChatPanel
-            messages={messages}
-            busy={busy}
-            disabled={notReady}
-            suggestions={suggestions}
-            onSend={send}
-          />
+        <div className="flex min-h-[70vh] flex-col lg:min-h-0">
+          <nav className="flex shrink-0 gap-1 border-b border-ink-800 px-3 pt-2">
+            <Tab active={tab === "chat"} onClick={() => setTab("chat")}>
+              Chat
+            </Tab>
+            <Tab active={tab === "how"} onClick={() => setTab("how")}>
+              How it works
+            </Tab>
+          </nav>
+          <div className="min-h-0 flex-1">
+            {/* Both stay mounted: switching tabs must not drop the transcript,
+                nor re-download the diagrams. */}
+            <div className={tab === "chat" ? "h-full" : "hidden"}>
+              <ChatPanel
+                messages={messages}
+                busy={busy}
+                disabled={notReady}
+                suggestions={suggestions}
+                onSend={send}
+              />
+            </div>
+            <div className={tab === "how" ? "h-full" : "hidden"}>
+              <HowItWorks />
+            </div>
+          </div>
         </div>
         <aside className="flex min-h-0 flex-col divide-y divide-ink-800 border-t border-ink-800 lg:overflow-y-auto lg:border-t-0 lg:border-l">
           <GraphView data={graph} />
@@ -173,6 +193,30 @@ export default function App() {
         </aside>
       </main>
     </div>
+  );
+}
+
+function Tab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={[
+        "rounded-t-lg px-3 py-1.5 text-xs font-medium transition",
+        active
+          ? "border-b-2 border-accent text-white"
+          : "border-b-2 border-transparent text-ink-400 hover:text-ink-200",
+      ].join(" ")}
+    >
+      {children}
+    </button>
   );
 }
 

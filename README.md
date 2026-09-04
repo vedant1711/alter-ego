@@ -15,28 +15,17 @@ them.
 
 ## How it works
 
-```
-User input (chat message OR writing sample / fact)
-        │
-        ▼
-  Ingestion (Gemini Flash)
-   ├─ entity + relationship extraction ──► knowledge graph (Neo4j)
-   ├─ embedding (gemini-embedding-001) ──► vector store (Qdrant)
-   └─ recursive summarization (on threshold) ──► summary memories
-        │
-        ▼  (on a new chat message)
-  Hybrid retriever
-   ├─ graph traversal (entities named in the query, 2 hops)
-   ├─ vector search (semantic top-k, session-filtered)
-   └─ BM25 keyword search (over the session's texts)
-   └─► reciprocal rank fusion → dedupe → context budget
-        │
-        ▼
-  Style-transfer generation (Gemini Flash, few-shot on the user's samples)
-        │
-        ▼
-  Twin reply (streamed)  +  retrieved-memories payload  +  graph delta
-```
+A message fans out to three retrievers at once, their results merge into a
+single ranking, and the winners become the grounding facts for a reply written
+in your voice.
+
+![One chat turn](docs/img/chat-turn.png)
+
+> Every diagram here is interactive — guided views, hover, export. Open
+> [`diagrams/chat-turn.html`](diagrams/chat-turn.html) locally, or use the
+> **How it works** tab in the running app. Sources are in
+> [`diagrams/src/`](diagrams/src/); see [`diagrams/README.md`](diagrams/README.md)
+> to regenerate.
 
 ### The three retrieval legs
 
@@ -98,6 +87,26 @@ came from. Encrypting them would mean either decrypting the whole graph on
 every read or giving up name-based traversal. The sentence *"I work at Meridian
 as a senior product designer"* is ciphertext; the node `Meridian` is not.
 
+### Where everything runs
+
+Every external service is on a free tier, and every one is optional — an
+unconfigured store falls back to an in-process equivalent behind the same
+interface, so the app degrades instead of failing.
+
+![System architecture](docs/img/system.png)
+
+Interactive: [`diagrams/system.html`](diagrams/system.html)
+
+### Adding a memory
+
+Ingestion is two model calls — one embedding, one extraction. The text becomes
+a vector *and* a set of typed graph edges, and the keyword index is invalidated
+rather than rebuilt.
+
+![Ingesting one memory](docs/img/ingest.png)
+
+Interactive: [`diagrams/ingest.html`](diagrams/ingest.html)
+
 ### Session isolation
 
 Sessions are anonymous and ephemeral — no accounts, no login. Each visitor gets
@@ -140,7 +149,7 @@ Open http://localhost:5173 and click **Load example persona**. Vite proxies
 `/api` to the backend, so no frontend configuration is needed in development.
 
 ```bash
-pytest          # 51 tests, all offline
+pytest          # 52 tests, all offline
 ```
 
 ### Going live with real services
@@ -188,7 +197,8 @@ pings `/api/health` on load and retries while the service boots, showing a
 
 | Service | Limit | What it means here |
 |---|---|---|
-| Gemini Flash | ~10–15 req/min, ~500–1500/day | Generation calls are serialised process-wide and retry 429s with jittered backoff |
+| `gemini-3.5-flash-lite` | Large free daily allowance | Generation calls are serialised process-wide and retry 429s with jittered backoff |
+| newer full-flash models | **~20 requests/day** on the free tier | Verified against a live key — `gemini-3.6-flash` returns a per-day quota error almost immediately. Check [ai.dev/rate-limit](https://ai.dev/rate-limit) before switching `GEMINI_CHAT_MODEL` |
 | gemini-embedding-001 | ~1,500 req/day | Embeddings are batched; the persona loads in one call |
 | Neo4j Aura Free | ~250MB, pauses after 7 days idle | Reactivate from the Aura console |
 | Qdrant Cloud Free | 1GB | One collection, filtered by `session_id` |
@@ -274,12 +284,17 @@ backend/
 ├── generation/          # few-shot style transfer
 ├── crypto/vault.py      # per-session Fernet keys
 ├── prompts/             # extraction, summarize, style_transfer
-└── tests/               # 51 tests, no external services
+└── tests/               # 52 tests, no external services
+
+diagrams/
+├── src/*.json           # diagram sources (the regenerable truth)
+└── *.html               # rendered interactive artifacts
 
 frontend/src/
-├── App.tsx              # three-pane shell, boot and warm-up
+├── App.tsx              # three-pane shell, tabs, boot and warm-up
 ├── api.ts               # session, ingest, chat (SSE), graph
-└── components/          # Onboarding, ChatPanel, GraphView, RetrievedMemories
+└── components/          # Onboarding, ChatPanel, GraphView,
+                         # RetrievedMemories, HowItWorks, DiagramFrame
 ```
 
 ## Ideas not built

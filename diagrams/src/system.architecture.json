@@ -1,0 +1,312 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ALTER EGO \u2014 System Architecture",
+    "output": "../system.html",
+    "viewBox": [
+      1080,
+      660
+    ],
+    "quality_profile": "showcase",
+    "visual_preset": "blueprint",
+    "views": [
+      {
+        "id": "memory-stores",
+        "label": "The three memory stores",
+        "focus": [
+          "api",
+          "qdrant",
+          "neo4j",
+          "bm25"
+        ],
+        "note": "Each store answers a different kind of question about the same session."
+      },
+      {
+        "id": "degradation",
+        "label": "Degradation path",
+        "focus": [
+          "qdrant",
+          "neo4j",
+          "local"
+        ],
+        "note": "Unconfigured services fall back to in-process equivalents behind the same interface."
+      },
+      {
+        "id": "protection",
+        "label": "Keys and quota",
+        "focus": [
+          "browser",
+          "guardrails",
+          "api",
+          "vault",
+          "gemini"
+        ],
+        "note": "Model keys stay server-side; every session is metered and every memory encrypted."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "browser",
+      "type": "external",
+      "label": "Browser",
+      "sublabel": "React + Vite",
+      "pos": [
+        40,
+        300
+      ],
+      "size": [
+        140,
+        64
+      ],
+      "tag": "Vercel"
+    },
+    {
+      "id": "guardrails",
+      "type": "security",
+      "label": "Guardrails",
+      "sublabel": "rate + lifetime caps",
+      "pos": [
+        260,
+        160
+      ],
+      "size": [
+        150,
+        62
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "FastAPI",
+      "sublabel": "hybrid retriever",
+      "pos": [
+        260,
+        300
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "Render Free"
+    },
+    {
+      "id": "vault",
+      "type": "security",
+      "label": "Fernet vault",
+      "sublabel": "per-session keys",
+      "pos": [
+        260,
+        450
+      ],
+      "size": [
+        150,
+        62
+      ]
+    },
+    {
+      "id": "bm25",
+      "type": "backend",
+      "label": "BM25 index",
+      "sublabel": "in-process",
+      "pos": [
+        470,
+        450
+      ],
+      "size": [
+        140,
+        62
+      ]
+    },
+    {
+      "id": "qdrant",
+      "type": "database",
+      "label": "Qdrant",
+      "sublabel": "vectors \u00b7 768d",
+      "pos": [
+        700,
+        160
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "tag": "1GB free"
+    },
+    {
+      "id": "neo4j",
+      "type": "database",
+      "label": "Neo4j Aura",
+      "sublabel": "knowledge graph",
+      "pos": [
+        700,
+        300
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "tag": "250MB free"
+    },
+    {
+      "id": "gemini",
+      "type": "cloud",
+      "label": "Gemini Flash-Lite",
+      "sublabel": "generate + embed",
+      "pos": [
+        700,
+        450
+      ],
+      "size": [
+        150,
+        62
+      ],
+      "tag": "free tier"
+    },
+    {
+      "id": "local",
+      "type": "database",
+      "label": "In-process stores",
+      "sublabel": "Qdrant :memory: \u00b7 networkx",
+      "pos": [
+        470,
+        150
+      ],
+      "size": [
+        170,
+        62
+      ],
+      "tag": "no-config fallback"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Backend process (Render Free)",
+      "wraps": [
+        "guardrails",
+        "api",
+        "vault",
+        "bm25",
+        "local"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "server-side only \u2014 keys never reach the client",
+      "wraps": [
+        "api",
+        "vault"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "browser-api",
+      "from": "browser",
+      "to": "api",
+      "label": "HTTPS \u00b7 SSE",
+      "variant": "emphasis"
+    },
+    {
+      "id": "guardrails-api",
+      "from": "guardrails",
+      "to": "api",
+      "label": "meters LLM calls",
+      "variant": "security",
+      "labelAt": [
+        335,
+        236
+      ]
+    },
+    {
+      "id": "api-vault",
+      "from": "api",
+      "to": "vault",
+      "label": "encrypt / decrypt",
+      "variant": "security",
+      "labelAt": [
+        335,
+        378
+      ]
+    },
+    {
+      "id": "api-bm25",
+      "from": "api",
+      "to": "bm25",
+      "label": "keyword leg"
+    },
+    {
+      "id": "api-qdrant",
+      "from": "api",
+      "to": "qdrant",
+      "label": "vector leg",
+      "labelAt": [
+        540,
+        300
+      ]
+    },
+    {
+      "id": "api-neo4j",
+      "from": "api",
+      "to": "neo4j",
+      "label": "graph leg",
+      "labelAt": [
+        620,
+        322
+      ]
+    },
+    {
+      "id": "api-gemini",
+      "from": "api",
+      "to": "gemini",
+      "label": "extract \u00b7 embed \u00b7 generate",
+      "variant": "emphasis",
+      "labelAt": [
+        530,
+        372
+      ]
+    },
+    {
+      "id": "api-local",
+      "from": "api",
+      "to": "local",
+      "label": "when unconfigured",
+      "variant": "dashed",
+      "labelAt": [
+        440,
+        250
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "violet",
+      "title": "Three stores, one session",
+      "items": [
+        "Qdrant holds encrypted memory text and its 768d vector",
+        "Neo4j holds entities and typed relationships",
+        "BM25 is rebuilt in-process and invalidated on write"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Degrades instead of failing",
+      "items": [
+        "No QDRANT_URL falls back to Qdrant in :memory: mode",
+        "No NEO4J_URI falls back to a networkx MultiDiGraph",
+        "No GEMINI_API_KEY runs deterministic offline stubs"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Isolation and secrets",
+      "items": [
+        "Every store read filters on a 122-bit session id",
+        "Memory text is encrypted with a per-session derived key",
+        "All model calls are server-side; the browser never sees a key"
+      ]
+    }
+  ]
+}

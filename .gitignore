@@ -21,3 +21,6 @@ dist/
 .DS_Store
 .idea/
 .vscode/
+
+# Copied from diagrams/ at build time by frontend/scripts/sync-diagrams.mjs
+frontend/public/diagrams/

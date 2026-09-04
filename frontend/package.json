@@ -4,10 +4,13 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/sync-diagrams.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/sync-diagrams.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "sync:diagrams": "node scripts/sync-diagrams.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

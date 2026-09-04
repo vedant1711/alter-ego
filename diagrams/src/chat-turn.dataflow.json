@@ -1,0 +1,293 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "ALTER EGO \u2014 One Chat Turn",
+    "output": "../chat-turn.html",
+    "viewBox": [
+      1080,
+      760
+    ],
+    "animation": "trace",
+    "quality_profile": "showcase",
+    "visual_preset": "signal-flow",
+    "views": [
+      {
+        "id": "three-legs",
+        "label": "The three retrievers",
+        "focus": [
+          "message",
+          "vector",
+          "keyword",
+          "graph"
+        ],
+        "note": "One query fans out to three stores that each fail at what the others are good at."
+      },
+      {
+        "id": "fusion",
+        "label": "Fusion and budget",
+        "focus": [
+          "vector",
+          "keyword",
+          "graph",
+          "rrf",
+          "budget"
+        ],
+        "note": "Incomparable scores are merged by rank, then trimmed to a context budget."
+      },
+      {
+        "id": "voice",
+        "label": "Grounding and voice",
+        "focus": [
+          "samples",
+          "budget",
+          "gemini",
+          "reply"
+        ],
+        "note": "Retrieved memories supply the facts; the user's own writing supplies the tone."
+      }
+    ]
+  },
+  "stages": [
+    {
+      "label": "Query"
+    },
+    {
+      "label": "Retrieve"
+    },
+    {
+      "label": "Fuse"
+    },
+    {
+      "label": "Generate"
+    },
+    {
+      "label": "Stream"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "message",
+      "type": "frontend",
+      "label": "Your message",
+      "sublabel": "POST /api/chat",
+      "stage": 0,
+      "row": 2,
+      "tag": "session-scoped"
+    },
+    {
+      "id": "vector",
+      "type": "database",
+      "label": "Vector search",
+      "sublabel": "Qdrant \u00b7 top-k",
+      "stage": 1,
+      "row": 0,
+      "tag": "semantic"
+    },
+    {
+      "id": "keyword",
+      "type": "backend",
+      "label": "BM25",
+      "sublabel": "in-process",
+      "stage": 1,
+      "row": 2,
+      "tag": "exact terms"
+    },
+    {
+      "id": "graph",
+      "type": "database",
+      "label": "Graph traversal",
+      "sublabel": "Neo4j \u00b7 2 hops",
+      "stage": 1,
+      "row": 4,
+      "tag": "structure"
+    },
+    {
+      "id": "rrf",
+      "type": "backend",
+      "label": "Rank fusion",
+      "sublabel": "weighted RRF",
+      "stage": 2,
+      "row": 1,
+      "tag": "dedupe"
+    },
+    {
+      "id": "budget",
+      "type": "backend",
+      "label": "Coverage + budget",
+      "sublabel": "one slot per leg",
+      "stage": 2,
+      "row": 4,
+      "tag": "top-k"
+    },
+    {
+      "id": "samples",
+      "type": "database",
+      "label": "Writing samples",
+      "sublabel": "longest first",
+      "stage": 3,
+      "row": 0,
+      "tag": "few-shot"
+    },
+    {
+      "id": "gemini",
+      "type": "cloud",
+      "label": "Gemini Flash-Lite",
+      "sublabel": "style transfer",
+      "stage": 3,
+      "row": 2,
+      "tag": "thinking: LOW"
+    },
+    {
+      "id": "reply",
+      "type": "frontend",
+      "label": "Streamed reply",
+      "sublabel": "SSE tokens",
+      "stage": 4,
+      "row": 1,
+      "tag": "in your voice"
+    },
+    {
+      "id": "panel",
+      "type": "frontend",
+      "label": "Memory panel",
+      "sublabel": "SSE meta",
+      "stage": 4,
+      "row": 3,
+      "tag": "tagged by leg"
+    }
+  ],
+  "flows": [
+    {
+      "id": "to-vector",
+      "from": "message",
+      "to": "vector",
+      "label": "embed 768d",
+      "classification": "semantic recall",
+      "variant": "default"
+    },
+    {
+      "id": "to-keyword",
+      "from": "message",
+      "to": "keyword",
+      "label": "tokenize",
+      "classification": "term overlap",
+      "variant": "default",
+      "labelAt": [
+        270,
+        322
+      ]
+    },
+    {
+      "id": "to-graph",
+      "from": "message",
+      "to": "graph",
+      "label": "seed entities",
+      "classification": "named in query",
+      "variant": "default"
+    },
+    {
+      "id": "vector-rrf",
+      "from": "vector",
+      "to": "rrf",
+      "label": "semantic hits",
+      "classification": "leg 1",
+      "variant": "emphasis"
+    },
+    {
+      "id": "keyword-rrf",
+      "from": "keyword",
+      "to": "rrf",
+      "label": "keyword hits",
+      "classification": "leg 2",
+      "variant": "emphasis",
+      "labelDx": -54
+    },
+    {
+      "id": "graph-rrf",
+      "from": "graph",
+      "to": "rrf",
+      "label": "triples",
+      "classification": "leg 3",
+      "variant": "emphasis"
+    },
+    {
+      "id": "rrf-budget",
+      "from": "rrf",
+      "to": "budget",
+      "label": "fused order",
+      "classification": "1/(60+rank)",
+      "variant": "emphasis",
+      "route": "straight",
+      "labelAt": [
+        530,
+        314
+      ]
+    },
+    {
+      "id": "budget-gemini",
+      "from": "budget",
+      "to": "gemini",
+      "label": "grounding facts",
+      "classification": "capped context",
+      "variant": "emphasis"
+    },
+    {
+      "id": "samples-gemini",
+      "from": "samples",
+      "to": "gemini",
+      "label": "tone",
+      "classification": "few-shot",
+      "variant": "dashed",
+      "labelAt": [
+        745,
+        200
+      ]
+    },
+    {
+      "id": "gemini-reply",
+      "from": "gemini",
+      "to": "reply",
+      "label": "tokens",
+      "classification": "streamed",
+      "variant": "emphasis"
+    },
+    {
+      "id": "budget-panel",
+      "from": "budget",
+      "to": "panel",
+      "label": "provenance",
+      "classification": "which leg found what",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "violet",
+      "title": "Why three retrievers",
+      "items": [
+        "Vector finds paraphrases but misses rare proper nouns",
+        "BM25 finds exact names but misses paraphrases",
+        "Graph finds multi-hop structure neither can express"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Fusion by rank, not score",
+      "items": [
+        "Cosine, BM25 and adjacency are on incomparable scales",
+        "RRF needs no normalisation and no tuning",
+        "A memory found by two legs outranks one found by one"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "The coverage guarantee",
+      "items": [
+        "Rewarding agreement buries the leg that overlaps least",
+        "Left alone, vector and keyword fill every slot",
+        "Each contributing leg is guaranteed one slot"
+      ]
+    }
+  ]
+}
