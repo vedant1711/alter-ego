@@ -11,6 +11,17 @@ import os
 os.environ.setdefault("RATE_LIMIT_PER_MIN", "10000")
 os.environ.setdefault("MAX_REQUESTS_PER_SESSION", "10000")
 
+# The suite must be hermetic: no network, no quota, no dependence on whether a
+# developer happens to have a .env. Environment variables outrank the .env file
+# in pydantic-settings, so blanking these pins every backend to its in-process
+# stand-in even on a fully configured machine.
+os.environ["GEMINI_API_KEY"] = ""
+os.environ["NEO4J_URI"] = ""
+os.environ["QDRANT_URL"] = ""
+# A fixed (throwaway) key, so encryption is deterministic across runs rather
+# than depending on whether the developer's .env happens to define one.
+os.environ["FERNET_KEY"] = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 

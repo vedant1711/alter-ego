@@ -4,6 +4,7 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
+from backend.config import get_settings
 from backend.crypto.vault import Vault, get_vault
 from backend.memory.vector_store import get_vector_store
 from backend.tests.conftest import ingest
@@ -52,6 +53,17 @@ async def test_stored_payload_is_ciphertext(client: TestClient, session_id: str)
     assert secret in [r.text for r in await store.list_session(session_id)]
 
 
-async def test_vault_reports_ephemeral_key(client: TestClient) -> None:
-    # No FERNET_KEY in the test environment, so the key must not be persistent.
-    assert get_vault().persistent is False
+def test_configured_key_is_persistent() -> None:
+    assert get_vault().persistent is True
+
+
+def test_missing_key_falls_back_to_an_ephemeral_one(monkeypatch) -> None:
+    """Without FERNET_KEY the app still encrypts, but only for this process."""
+    monkeypatch.setattr(get_settings(), "fernet_key", "")
+    get_vault.cache_clear()
+    try:
+        vault = get_vault()
+        assert vault.persistent is False
+        assert vault.decrypt("s1", vault.encrypt("s1", "still encrypted")) == "still encrypted"
+    finally:
+        get_vault.cache_clear()

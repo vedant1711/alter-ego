@@ -16,9 +16,15 @@ class Settings(BaseSettings):
 
     # --- LLM ---
     gemini_api_key: str = ""
-    gemini_chat_model: str = "gemini-2.5-flash"
+    gemini_chat_model: str = "gemini-3.5-flash-lite"
     gemini_embed_model: str = "gemini-embedding-001"
     embed_dim: int = 768
+    # Gemini 3.x thinking level: MINIMAL, LOW, MEDIUM or HIGH. Thinking tokens
+    # count against max_output_tokens and dominate latency, and neither
+    # extraction nor voice-matching benefits from deep reasoning. Set empty to
+    # omit the field entirely, which older models (2.5) require.
+    gemini_thinking_level: str = "LOW"
+    max_output_tokens: int = 2048
 
     # --- Knowledge graph ---
     neo4j_uri: str = ""

@@ -13,7 +13,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from backend import persona, sessions
 from backend.config import get_settings
-from backend.deps import get_llm
+from backend.deps import get_llm, quota_message
 from backend.guardrails import enforce
 from backend.generation.style_transfer import build_prompt, fetch_style_samples
 from backend.ingestion.embed import embed_one, embed_texts
@@ -154,7 +154,10 @@ async def chat(body: ChatIn) -> EventSourceResponse:
                 yield {"event": "token", "data": json.dumps({"text": chunk})}
         except Exception as exc:  # noqa: BLE001 - surface any provider failure to the UI
             log.exception("chat generation failed")
-            yield {"event": "error", "data": json.dumps({"message": str(exc)})}
+            # A raw provider error is a wall of JSON; quota failures get a
+            # sentence the visitor can act on instead.
+            message = quota_message(exc) or f"Generation failed: {exc}"
+            yield {"event": "error", "data": json.dumps({"message": message})}
             return
 
         # Remember the turn only after a successful reply.
