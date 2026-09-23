@@ -1,6 +1,6 @@
 /** Thin client for the ALTER EGO backend. */
 
-import type { GraphData, RetrievedMemory } from "./types";
+import type { GraphData, RetrievedMemory, Warning } from "./types";
 
 // Empty in dev: Vite proxies /api to the local backend (see vite.config.ts).
 // In production this is the Render URL, injected at build time.
@@ -13,6 +13,8 @@ function url(path: string): string {
 export interface Health {
   status: string;
   offline: boolean;
+  stores?: Record<string, { durable: boolean; reachable: boolean }>;
+  warnings?: Warning[];
 }
 
 export async function health(): Promise<Health> {
@@ -28,14 +30,23 @@ export async function health(): Promise<Health> {
  * back pays a 10-30s cold start that often shows up as a failed fetch rather
  * than a slow one — so this retries instead of giving up.
  */
-export async function warmUp(attempts = 6, delayMs = 4000): Promise<Health> {
+export async function warmUp(
+  onRetry?: (attempt: number) => void,
+  attempts = 6,
+  delayMs = 4000
+): Promise<Health> {
   let lastError: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
       return await health();
     } catch (err) {
       lastError = err;
-      if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
+      if (i < attempts - 1) {
+        // The first failure is the signal that we are paying a cold start,
+        // not that the backend is down — tell the UI so it can say so.
+        onRetry?.(i + 1);
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
     }
   }
   throw lastError;
@@ -50,6 +61,7 @@ export async function createSession(): Promise<string> {
 export interface ChatMeta {
   retrieved_memories: RetrievedMemory[];
   graph_delta: GraphData | null;
+  warnings?: Warning[];
 }
 
 export async function getGraph(sessionId: string): Promise<GraphData> {
@@ -64,6 +76,7 @@ export interface IngestResult {
   memory_id: string;
   entities_added: number;
   relationships_added: number;
+  warnings?: Warning[];
 }
 
 export async function ingest(
@@ -88,6 +101,7 @@ export interface ExamplePersona {
   relationships_added: number;
   suggested_questions: string[];
   already_loaded: boolean;
+  warnings?: Warning[];
 }
 
 export async function loadExample(sessionId: string): Promise<ExamplePersona> {
@@ -147,7 +161,7 @@ export async function chat(
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+    buffer = normalizeNewlines(buffer + decoder.decode(value, { stream: true }));
 
     // SSE frames are separated by a blank line.
     let split: number;
@@ -157,6 +171,27 @@ export async function chat(
       dispatch(frame, handlers);
     }
   }
+
+  // A final frame with no trailing blank line would otherwise be dropped.
+  const tail = normalizeNewlines(buffer + decoder.decode()).trim();
+  if (tail) dispatch(tail, handlers);
+}
+
+/**
+ * Collapse CRLF and lone CR to LF.
+ *
+ * The SSE spec allows any of the three as a line terminator, and sse-starlette
+ * emits CRLF — so frames arrive separated by "\r\n\r\n", which contains no
+ * "\n\n" for the frame splitter to find. Without this every frame is silently
+ * dropped and the reply renders as an empty bubble.
+ *
+ * A trailing CR is left alone: it may be the first half of a CRLF that lands
+ * in the next chunk, and converting it early would split a frame in two.
+ */
+function normalizeNewlines(buffer: string): string {
+  const danglingCR = buffer.endsWith("\r");
+  const head = danglingCR ? buffer.slice(0, -1) : buffer;
+  return head.replace(/\r\n|\r/g, "\n") + (danglingCR ? "\r" : "");
 }
 
 function dispatch(frame: string, handlers: ChatHandlers): void {

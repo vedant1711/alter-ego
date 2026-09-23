@@ -12,6 +12,7 @@ found by two legs naturally outranks one found by a single leg.
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 
@@ -21,6 +22,8 @@ from backend.memory.graph_store import get_graph_store
 from backend.memory.keyword_store import get_keyword_store
 from backend.memory.vector_store import get_vector_store
 from backend.schemas import RetrievedMemory
+
+log = logging.getLogger(__name__)
 
 RRF_K = 60
 
@@ -155,9 +158,18 @@ async def _keyword_leg(session_id: str, query: str, limit: int) -> list[tuple[st
 
 
 async def _graph_leg(session_id: str, query: str, limit: int) -> list[tuple[str, str]]:
+    """Traverse the graph, or contribute nothing if it is unreachable.
+
+    Losing this leg costs recall; raising here would cost the whole reply, and
+    the other two legs can still answer.
+    """
     store = get_graph_store()
-    seeds = select_seeds(query, await store.entity_keys(session_id))
-    if not seeds:
+    try:
+        seeds = select_seeds(query, await store.entity_keys(session_id))
+        if not seeds:
+            return []
+        triples = await store.neighbourhood(session_id, seeds)
+    except Exception:  # noqa: BLE001 - a degraded leg, not a failed turn
+        log.warning("graph retrieval leg unavailable", exc_info=False)
         return []
-    triples = await store.neighbourhood(session_id, seeds)
     return [(t, "graph") for t in triples[:limit]]

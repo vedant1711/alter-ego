@@ -117,9 +117,13 @@ class VectorStore:
             # Cloud Qdrant needs explicit payload indexes for filtered search to
             # stay fast. Local mode ignores them, so only ask when remote.
             if self.remote:
+                # Every field any filter touches needs an index: cloud Qdrant
+                # rejects a filter on an unindexed field with a 400, where the
+                # local in-memory client silently allows it.
                 for key, schema in (
                     ("session_id", models.PayloadSchemaType.KEYWORD),
                     ("source_type", models.PayloadSchemaType.KEYWORD),
+                    ("summarized", models.PayloadSchemaType.BOOL),
                 ):
                     try:
                         await self._client.create_payload_index(self._collection, key, schema)

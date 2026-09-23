@@ -13,6 +13,8 @@ import GraphView from "./components/GraphView";
 import HowItWorks from "./components/HowItWorks";
 import Onboarding from "./components/Onboarding";
 import RetrievedMemories from "./components/RetrievedMemories";
+import Warnings from "./components/Warnings";
+import { COLD_START, OFFLINE_MODE, useWarnings } from "./useWarnings";
 import type { ChatMessage, GraphData, RetrievedMemory } from "./types";
 
 type Boot = "warming" | "ready" | "failed";
@@ -23,6 +25,8 @@ const nextId = () => `m${++idSeq}`;
 export default function App() {
   const [boot, setBoot] = useState<Boot>("warming");
   const [offline, setOffline] = useState(false);
+  const [coldStart, setColdStart] = useState(false);
+  const { warnings, report, dismiss } = useWarnings();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [retrieved, setRetrieved] = useState<RetrievedMemory[]>([]);
   const [graph, setGraph] = useState<GraphData>({ nodes: [], edges: [] });
@@ -39,14 +43,21 @@ export default function App() {
     setBoot("warming");
     (async () => {
       try {
-        const h = await warmUp();
+        const h = await warmUp(() => {
+          if (!cancelled) setColdStart(true);
+        });
         const sid = await createSession();
         if (cancelled) return;
         sessionId.current = sid;
         setOffline(h.offline);
+        setColdStart(false);
+        report(h.warnings);
         setBoot("ready");
       } catch {
-        if (!cancelled) setBoot("failed");
+        if (!cancelled) {
+          setColdStart(false);
+          setBoot("failed");
+        }
       }
     })();
     return () => {
@@ -58,20 +69,23 @@ export default function App() {
     const sid = sessionId.current;
     if (!sid) return;
     try {
-      setGraph(await getGraph(sid));
+      const g = await getGraph(sid);
+      setGraph(g);
+      report(g.warnings);
     } catch {
       // A failed refresh just leaves the last good graph on screen.
     }
-  }, []);
+  }, [report]);
 
   const addMemory = useCallback(
     async (text: string, source: IngestSource) => {
       const sid = sessionId.current;
       if (!sid) throw new Error("no session");
-      await ingest(sid, text, source);
+      const result = await ingest(sid, text, source);
+      report(result.warnings);
       await refreshGraph();
     },
-    [refreshGraph]
+    [refreshGraph, report]
   );
 
   const seedExample = useCallback(async () => {
@@ -80,8 +94,9 @@ export default function App() {
     const persona = await loadExample(sid);
     setExampleLoaded(true);
     setSuggestions(persona.suggested_questions);
+    report(persona.warnings);
     await refreshGraph();
-  }, [refreshGraph]);
+  }, [refreshGraph, report]);
 
   const send = useCallback(async (text: string) => {
     const sid = sessionId.current;
@@ -105,6 +120,7 @@ export default function App() {
         onToken: (chunk) => patch((m) => ({ ...m, text: m.text + chunk })),
         onMeta: (meta) => {
           setRetrieved(meta.retrieved_memories ?? []);
+          report(meta.warnings);
           // The delta says whether the turn changed the graph at all.
           const delta = meta.graph_delta;
           if (delta && (delta.nodes.length > 0 || delta.edges.length > 0)) void refreshGraph();
@@ -117,7 +133,7 @@ export default function App() {
       patch((m) => ({ ...m, streaming: false }));
       setBusy(false);
     }
-  }, [refreshGraph]);
+  }, [refreshGraph, report]);
 
   const notReady = boot !== "ready";
 
@@ -133,12 +149,14 @@ export default function App() {
         <StatusDot boot={boot} />
       </header>
 
-      {offline && (
-        <p className="shrink-0 border-b border-amber-900/60 bg-amber-950/30 px-5 py-2 text-xs text-amber-300">
-          Offline mode — no <code>GEMINI_API_KEY</code> is configured, so replies are templated
-          rather than generated.
-        </p>
-      )}
+      <Warnings
+        warnings={[
+          ...(coldStart ? [COLD_START] : []),
+          ...(offline ? [OFFLINE_MODE] : []),
+          ...warnings,
+        ]}
+        onDismiss={dismiss}
+      />
 
       {boot === "failed" && (
         <div className="shrink-0 border-b border-red-900/60 bg-red-950/30 px-5 py-2 text-xs text-red-300">

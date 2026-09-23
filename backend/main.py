@@ -19,7 +19,12 @@ from backend.generation.style_transfer import build_prompt, fetch_style_samples
 from backend.ingestion.embed import embed_one, embed_texts
 from backend.ingestion.extract import extract
 from backend.ingestion.summarize import maybe_summarize
-from backend.memory.graph_store import GraphDelta, get_graph_store
+from backend.memory.graph_store import (
+    GraphDelta,
+    classify_error,
+    get_graph_store,
+    warning_text,
+)
 from backend.memory.keyword_store import get_keyword_store
 from backend.memory.vector_store import MemoryRecord, get_vector_store
 from backend.retrieval.hybrid import estimate_tokens, retrieve
@@ -30,6 +35,7 @@ from backend.schemas import (
     LoadExampleIn,
     LoadExampleOut,
     SessionOut,
+    Warning,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -40,11 +46,22 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # Warm both stores up front so the first request is not slowed by setup.
-    await get_vector_store().ensure_ready()
-    await get_graph_store().ensure_ready()
+    # Warm the stores so the first request is not slowed by setup — but never
+    # let a sleeping one stop the app booting. A paused Neo4j Aura instance
+    # should cost the graph, not the whole service.
+    for name, warm in (
+        ("vector", get_vector_store().ensure_ready),
+        ("graph", get_graph_store().ensure_ready),
+    ):
+        try:
+            await warm()
+        except Exception as exc:  # noqa: BLE001 - degrade, never fail to start
+            log.warning("%s store unavailable at startup: %s", name, exc)
     yield
-    await get_graph_store().close()
+    try:
+        await get_graph_store().close()
+    except Exception:  # noqa: BLE001 - shutdown is best-effort
+        log.debug("graph store close failed", exc_info=True)
 
 
 app = FastAPI(
@@ -66,9 +83,30 @@ api = APIRouter(prefix="/api")
 
 
 @api.get("/health")
-def health() -> dict[str, object]:
-    """Liveness probe. Also used by the frontend as a cold-start warm-up ping."""
-    return {"status": "ok", "offline": get_llm().offline}
+async def health() -> dict[str, object]:
+    """Liveness probe, warm-up ping, and store-reachability report.
+
+    The graph probe is what lets the UI say "Aura is paused, resume it" instead
+    of leaving the graph mysteriously empty.
+    """
+    store = get_graph_store()
+    graph_ok, graph_code = await store.probe()
+    warnings: list[Warning] = []
+
+    if not graph_ok:
+        code = graph_code or "graph_error"
+        message, action = warning_text(code)
+        warnings.append(Warning(code=code, message=message, action=action))
+
+    return {
+        "status": "ok",
+        "offline": get_llm().offline,
+        "stores": {
+            "graph": {"durable": store.remote, "reachable": graph_ok},
+            "vector": {"durable": get_vector_store().remote, "reachable": True},
+        },
+        "warnings": [w.model_dump() for w in warnings],
+    }
 
 
 @api.post("/session", response_model=SessionOut)
@@ -82,17 +120,38 @@ def create_session() -> SessionOut:
 async def ingest(body: IngestIn) -> IngestOut:
     state = sessions.get_or_create(body.session_id)
     enforce(state, text=body.text)
-    record, delta = await remember(body.session_id, body.text, body.source)
+    record, delta, warnings = await remember(body.session_id, body.text, body.source)
     entities, relations = delta.counts
     return IngestOut(
-        memory_id=record.id, entities_added=entities, relationships_added=relations
+        memory_id=record.id,
+        entities_added=entities,
+        relationships_added=relations,
+        warnings=warnings,
     )
 
 
 @api.get("/graph")
-async def graph(session_id: str = Query(min_length=1)) -> dict[str, list[dict[str, str]]]:
-    """The session's whole knowledge graph, for the live visualisation."""
-    return (await get_graph_store().get_graph(session_id)).to_dict()
+async def graph(session_id: str = Query(min_length=1)) -> dict[str, object]:
+    """The session's whole knowledge graph, for the live visualisation.
+
+    An unreachable graph returns an empty one with a warning rather than a 500,
+    so the panel can explain itself instead of the UI silently failing.
+    """
+    try:
+        payload: dict[str, object] = dict(
+            (await get_graph_store().get_graph(session_id)).to_dict()
+        )
+        payload["warnings"] = []
+        return payload
+    except Exception as exc:  # noqa: BLE001 - degrade to an empty graph
+        code = classify_error(exc)
+        message, action = warning_text(code)
+        log.warning("graph read failed (%s): %s", code, exc)
+        return {
+            "nodes": [],
+            "edges": [],
+            "warnings": [Warning(code=code, message=message, action=action).model_dump()],
+        }
 
 
 @api.post("/load-example", response_model=LoadExampleOut)
@@ -115,7 +174,7 @@ async def load_example(body: LoadExampleIn) -> LoadExampleOut:
     # Bulk loading costs about two model calls, so it is metered as two requests.
     enforce(state, cost=2)
     items = persona.texts()
-    delta = await remember_many(body.session_id, items)
+    delta, warnings = await remember_many(body.session_id, items)
     state.example_loaded = True
 
     entities, relationships = delta.counts
@@ -127,6 +186,7 @@ async def load_example(body: LoadExampleIn) -> LoadExampleOut:
         entities_added=entities,
         relationships_added=relationships,
         suggested_questions=profile["suggested_questions"],
+        warnings=warnings,
     )
 
 
@@ -161,9 +221,9 @@ async def chat(body: ChatIn) -> EventSourceResponse:
             return
 
         # Remember the turn only after a successful reply.
-        delta = GraphDelta([], [])
+        delta, warnings = GraphDelta([], []), []
         try:
-            _, delta = await remember(body.session_id, body.message, "message")
+            _, delta, warnings = await remember(body.session_id, body.message, "message")
             state.record_turn(body.message, "".join(reply).strip())
         except Exception:  # noqa: BLE001 - a failed write must not break the reply
             log.exception("failed to persist message memory")
@@ -174,6 +234,7 @@ async def chat(body: ChatIn) -> EventSourceResponse:
                 {
                     "retrieved_memories": [m.model_dump() for m in hits],
                     "graph_delta": delta.to_dict(),
+                    "warnings": [w.model_dump() for w in warnings],
                 }
             ),
         }
@@ -192,7 +253,7 @@ async def chat(body: ChatIn) -> EventSourceResponse:
 
 async def remember(
     session_id: str, text: str, source_type: str
-) -> tuple[MemoryRecord, GraphDelta]:
+) -> tuple[MemoryRecord, GraphDelta, list[Warning]]:
     """Ingest one piece of text into both the vector store and the graph."""
     clean = text.strip()
     record = MemoryRecord(session_id=session_id, text=clean, source_type=source_type)  # type: ignore[arg-type]
@@ -201,16 +262,32 @@ async def remember(
     await get_vector_store().add([record], [vector])
 
     entities, relationships = await extract(clean)
-    delta = await get_graph_store().add(session_id, entities, relationships)
+    delta, warnings = await write_graph(session_id, entities, relationships)
 
     # New text means the BM25 index for this session is stale.
     get_keyword_store().invalidate(session_id)
-    return record, delta
+    return record, delta, warnings
+
+
+async def write_graph(session_id, entities, relationships) -> tuple[GraphDelta, list[Warning]]:
+    """Write to the graph, downgrading a failure to a warning.
+
+    The vector write has already succeeded by this point, so the memory is
+    saved and will still be recalled — only the graph leg is degraded. Raising
+    here would tell the user their memory was lost when it was not.
+    """
+    try:
+        return await get_graph_store().add(session_id, entities, relationships), []
+    except Exception as exc:  # noqa: BLE001 - any store failure degrades, never fails
+        code = classify_error(exc)
+        message, action = warning_text(code)
+        log.warning("graph write failed (%s): %s", code, exc)
+        return GraphDelta([], []), [Warning(code=code, message=message, action=action)]
 
 
 async def remember_many(
     session_id: str, items: list[tuple[str, str]]
-) -> GraphDelta:
+) -> tuple[GraphDelta, list[Warning]]:
     """Ingest many texts using one batched embedding call and one extraction call.
 
     Extracting each item separately would be more precise, but it would also be
@@ -226,10 +303,10 @@ async def remember_many(
 
     facts = "\n".join(r.text for r in records if r.source_type == "fact")
     entities, relationships = await extract(facts)
-    delta = await get_graph_store().add(session_id, entities, relationships)
+    delta, warnings = await write_graph(session_id, entities, relationships)
 
     get_keyword_store().invalidate(session_id)
-    return delta
+    return delta, warnings
 
 
 app.include_router(api)

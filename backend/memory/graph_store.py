@@ -75,6 +75,50 @@ def triple_to_sentence(source: str, rel_type: str, target: str) -> str:
     return f"{source} {verb} {target}"
 
 
+# code -> (message, action). Written for the person reading them, not for a log.
+WARNING_TEXT: dict[str, tuple[str, str]] = {
+    "graph_auth": (
+        "The knowledge graph rejected our credentials.",
+        "Check NEO4J_USERNAME and NEO4J_PASSWORD.",
+    ),
+    "graph_unavailable": (
+        "The knowledge graph is unreachable — a free Neo4j Aura instance pauses itself "
+        "after about a week idle.",
+        "Resume the instance from the Neo4j Aura console; it takes about a minute. "
+        "Memories are still being saved and recalled meanwhile.",
+    ),
+    "graph_error": (
+        "The knowledge graph rejected a write.",
+        "Memories are still saved and recalled; only the graph is affected.",
+    ),
+}
+
+
+def classify_error(exc: BaseException) -> str:
+    """Map a driver exception to a warning code.
+
+    Neo4j Aura Free pauses itself after about a week idle, and the driver
+    surfaces that as an ordinary connection failure — indistinguishable from a
+    bad URI unless you read the text. Naming it "paused" is more useful than
+    "unavailable", because resuming is one button in the console.
+    """
+    name = type(exc).__name__
+    text = str(exc).lower()
+
+    if name == "AuthError" or (name == "ClientError" and "auth" in text):
+        return "graph_auth"
+    if name in ("ServiceUnavailable", "SessionExpired", "ConfigurationError") or any(
+        t in text
+        for t in ("unable to retrieve routing", "connection refused", "resolve address", "timed out")
+    ):
+        return "graph_unavailable"
+    return "graph_error"
+
+
+def warning_text(code: str) -> tuple[str, str]:
+    return WARNING_TEXT.get(code, WARNING_TEXT["graph_error"])
+
+
 class NetworkXGraphStore:
     """In-process fallback. One MultiDiGraph per session keeps isolation trivial."""
 
@@ -89,6 +133,10 @@ class NetworkXGraphStore:
 
     async def ensure_ready(self) -> None:
         return None
+
+    async def probe(self) -> tuple[bool, str | None]:
+        """In-process, so it is reachable whenever the app is."""
+        return True, None
 
     async def add(
         self, session_id: str, entities: list[Entity], relationships: list[Relationship]
@@ -190,6 +238,15 @@ class Neo4jGraphStore:
                     "FOR (n:Entity) REQUIRE (n.session_id, n.key) IS UNIQUE"
                 )
             self._ready = True
+
+    async def probe(self) -> tuple[bool, str | None]:
+        """Cheap reachability check for /health. Never raises."""
+        try:
+            async with self._driver.session() as session:
+                await (await session.run("RETURN 1")).single()
+            return True, None
+        except Exception as exc:  # noqa: BLE001 - any failure means "not reachable"
+            return False, classify_error(exc)
 
     async def add(
         self, session_id: str, entities: list[Entity], relationships: list[Relationship]

@@ -22,10 +22,23 @@ class IngestIn(BaseModel):
     source: Literal["sample", "fact"]
 
 
+class Warning(BaseModel):
+    """A degradation the user should know about, but which did not fail the request.
+
+    `code` is for the UI to key off; `message` and `action` are shown verbatim,
+    so they are written for the person reading them, not for a log.
+    """
+
+    code: str
+    message: str
+    action: str | None = None
+
+
 class IngestOut(BaseModel):
     memory_id: str
     entities_added: int = 0
     relationships_added: int = 0
+    warnings: list[Warning] = []
 
 
 class LoadExampleIn(BaseModel):
@@ -40,6 +53,7 @@ class LoadExampleOut(BaseModel):
     relationships_added: int
     suggested_questions: list[str]
     already_loaded: bool = False
+    warnings: list[Warning] = []
 
 
 class RetrievedMemory(BaseModel):

@@ -31,4 +31,12 @@ export interface GraphEdge {
 export interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  warnings?: Warning[];
+}
+
+/** A degradation worth telling the user about, from the server or the client. */
+export interface Warning {
+  code: string;
+  message: string;
+  action?: string | null;
 }
